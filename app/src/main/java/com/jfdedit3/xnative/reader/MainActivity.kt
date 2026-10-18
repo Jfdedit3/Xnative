@@ -3,6 +3,8 @@ package com.jfdedit3.xnative.reader
 import android.content.Intent
 import androidx.core.net.toUri
 import android.os.Bundle
+import androidx.activity.compose.BackHandler
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -12,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,6 +24,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,11 +44,11 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val Ink = Color(0xFF090D13)
-private val Panel = Color(0xFF121923)
-private val Blue = Color(0xFF70B4FF)
-private val Muted = Color(0xFF95A3B5)
-private val Line = Color(0xFF222D3B)
+internal val Ink = Color(0xFF090D13)
+internal val Panel = Color(0xFF121923)
+internal val Blue = Color(0xFF70B4FF)
+internal val Muted = Color(0xFF95A3B5)
+internal val Line = Color(0xFF222D3B)
 
 class MainActivity : ComponentActivity() {
     private val model: FeedViewModel by viewModels()
@@ -92,7 +96,35 @@ private fun XnativeApp(model: FeedViewModel) {
     var importDialog by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Post?>(null) }
     val snackbar = remember { SnackbarHostState() }
+    val feedScroll = rememberLazyListState()
+    val profileScreens = rememberSaveableStateHolder()
+    val profiles: ProfileViewModel = viewModel()
+    val profileState by profiles.state.collectAsStateWithLifecycle()
+    var profileStack by rememberSaveableState(arrayListOf<String>())
+    val profileHandle = profileStack.lastOrNull().orEmpty()
+    val closeProfile: () -> Unit = { profileStack = ArrayList(profileStack.dropLast(1)) }
+    val showProfile: (String) -> Unit = { handle ->
+        val canonical = runCatching { Links.handle(handle) }.getOrNull()
+        if (canonical != null) {
+            selected = null
+            if (canonical != profileHandle) profileStack = ArrayList(profileStack + canonical)
+        }
+    }
+    LaunchedEffect(profileHandle, library.rssOnly) {
+        if (profileHandle.isNotEmpty()) profiles.load(profileHandle, library) else profiles.close()
+    }
+    BackHandler(enabled = profileHandle.isNotEmpty() && selected == null) { closeProfile() }
     LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); model.clearMessage() } }
+    if (profileHandle.isNotEmpty()) {
+        profileScreens.SaveableStateProvider(profileHandle) {
+            ProfileScreen(if (profileState.account == profileHandle) profileState else ProfileState(profileHandle, loading = true), library, busy, snackbar,
+            onBack = { closeProfile() }, onRefresh = { profiles.load(profileHandle, library) },
+            onFollow = { if (profileHandle in library.accounts) model.unfollow(profileHandle) else model.follow(profileHandle) },
+            onBookmark = model::bookmark, onPost = { selected = it }, onProfile = showProfile)
+        }
+        selected?.let { post -> PostDialog(post, { selected = null }, showProfile) }
+        return
+    }
     val titles = listOf("Votre fil", "Explorer", "Favoris", "Abonnements")
     val icons = listOf(Icons.Outlined.Home, Icons.Outlined.Search, Icons.Outlined.BookmarkBorder, Icons.Outlined.PeopleOutline)
     Scaffold(containerColor = Ink, snackbarHost = { SnackbarHost(snackbar) },
@@ -131,7 +163,7 @@ private fun XnativeApp(model: FeedViewModel) {
         Column(Modifier.padding(padding).fillMaxSize()) {
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Blue)
             when (tab) {
-                3 -> Accounts(library, busy, model)
+                3 -> Accounts(library, busy, model, showProfile)
                 else -> {
                     Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
                         Text(titles[tab], fontSize = 29.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.7).sp)
@@ -160,7 +192,7 @@ private fun XnativeApp(model: FeedViewModel) {
                     }
                     PullToRefreshBox(isRefreshing = busy, onRefresh = { if (tab != 2) model.refresh() }, modifier = Modifier.weight(1f)) {
                         if (posts.isEmpty()) {
-                            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(24.dp)) {
+                            LazyColumn(Modifier.fillMaxSize(), state = feedScroll, contentPadding = PaddingValues(24.dp)) {
                                 item {
                                     EmptyState(when(tab) { 2 -> "Une bonne lecture se garde"; 1 -> "Trouvez votre prochaine lecture"; else -> if (mediaOnly) "Aucun média pour le moment" else "Votre fil commence ici" },
                                         when(tab) { 2 -> "Touchez le marque-page d’une publication pour la retrouver ici."; 1 -> "La recherche porte sur les publications déjà chargées. Ajoutez des comptes pour enrichir votre fil."; else -> "Suivez vos comptes préférés ou importez un lien X pour commencer." },
@@ -171,9 +203,9 @@ private fun XnativeApp(model: FeedViewModel) {
                                     }
                                 }
                             }
-                        } else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 90.dp)) {
+                        } else LazyColumn(Modifier.fillMaxSize(), state = feedScroll, contentPadding = PaddingValues(bottom = 90.dp)) {
                             items(posts, key = { it.id }) { post ->
-                                PostCard(post, library.saved.any { it.id == post.id }, busy, { model.bookmark(post) }, { selected = post })
+                                PostCard(post, library.saved.any { it.id == post.id }, busy, { model.bookmark(post) }, { selected = post }, showProfile)
                                 HorizontalDivider(color = Line)
                             }
                             item { Text("Vous êtes à jour · ${posts.size} publications en cache", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(20.dp)) }
@@ -184,7 +216,7 @@ private fun XnativeApp(model: FeedViewModel) {
         }
     }
     if (importDialog) ImportDialog(busy, onDismiss = { importDialog = false }, onImport = { model.importPost(it); importDialog = false; tab = 0 })
-    selected?.let { post -> PostDialog(post, { selected = null }) }
+    selected?.let { post -> PostDialog(post, { selected = null }, showProfile) }
 }
 
 // saveable state keeps navigation and search intact during configuration changes.
@@ -205,18 +237,23 @@ private fun EmptyState(title: String, description: String, icon: ImageVector) {
 }
 
 @Composable
-private fun Accounts(library: Library, busy: Boolean, model: FeedViewModel) {
+private fun Accounts(library: Library, busy: Boolean, model: FeedViewModel, onProfile: (String) -> Unit) {
     var handle by rememberSaveableState("")
     var remove by remember { mutableStateOf<String?>(null) }
     var clear by remember { mutableStateOf(false) }
+    var accountError by remember { mutableStateOf<String?>(null) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Text("À votre rythme.", fontWeight = FontWeight.Bold, fontSize = 30.sp, letterSpacing = (-1).sp)
             Text("Choisissez qui vous voulez lire.", color = Muted, modifier = Modifier.padding(top = 6.dp))
         }
         item {
-            OutlinedTextField(handle, { handle = it }, label = { Text("Pseudo X") }, prefix = { Text("@") },
-                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(handle, { handle = it; accountError = null }, label = { Text("Pseudo X") }, prefix = { Text("@") },
+                singleLine = true, isError = accountError != null, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+            accountError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+            TextButton(onClick = {
+                runCatching { Links.handle(handle) }.onSuccess(onProfile).onFailure { accountError = it.message }
+            }, enabled = handle.isNotBlank()) { Text("Voir le profil →") }
             Spacer(Modifier.height(10.dp))
             Button(onClick = { model.follow(handle); handle = "" }, enabled = !busy && handle.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Outlined.PersonAdd, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Suivre ce compte")
@@ -232,7 +269,7 @@ private fun Accounts(library: Library, busy: Boolean, model: FeedViewModel) {
         }
         item { Text("VOS ABONNEMENTS · ${library.accounts.size}", color = Muted, fontSize = 11.sp, letterSpacing = 1.sp) }
         items(library.accounts, key = { it }) { account ->
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Panel).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Panel).clickable { onProfile(account) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 InitialAvatar(account)
                 Column(Modifier.weight(1f).padding(start = 12.dp)) {
                     Text("@$account", fontWeight = FontWeight.SemiBold)
@@ -245,7 +282,7 @@ private fun Accounts(library: Library, busy: Boolean, model: FeedViewModel) {
             HorizontalDivider(color = Line)
             Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Utiliser uniquement le RSS", fontSize = 14.sp)
+                    Text("Publications via RSS uniquement", fontSize = 14.sp)
                     Text("Sinon : API, puis RSS en cas d’échec.", color = Muted, fontSize = 11.sp)
                 }
                 Switch(checked = library.rssOnly, onCheckedChange = model::rssOnly, enabled = !busy)
@@ -256,7 +293,7 @@ private fun Accounts(library: Library, busy: Boolean, model: FeedViewModel) {
             Text("Sans connexion X. Abonnements, favoris et cache sont enregistrés sur cet appareil. Les compteurs proviennent de FxTwitter et ne sont pas mis à jour en temps réel. Les vidéos et les interactions X s’ouvrent dans une application externe.",
                 color = Muted, fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 8.dp))
             TextButton(onClick = { clear = true }, enabled = !busy && library.imported.isNotEmpty()) { Text("Effacer les publications importées") }
-            Text("Xnative 1.0 · Indépendant de X et de FxTwitter", color = Muted, fontSize = 10.sp)
+            Text("Xnative 1.1.0 · Indépendant de X et de FxTwitter", color = Muted, fontSize = 10.sp)
         }
     }
     remove?.let { account ->
@@ -270,26 +307,26 @@ private fun Accounts(library: Library, busy: Boolean, model: FeedViewModel) {
 }
 
 @Composable
-private fun InitialAvatar(name: String, url: String = "") {
-    Box(Modifier.size(42.dp).clip(CircleShape).background(Color(0xFF23374D)), contentAlignment = Alignment.Center) {
+internal fun InitialAvatar(name: String, modifier: Modifier = Modifier, url: String = "") {
+    Box(modifier.size(42.dp).clip(CircleShape).background(Color(0xFF23374D)), contentAlignment = Alignment.Center) {
         Text(name.take(1).uppercase(), fontWeight = FontWeight.Bold, color = Blue)
         if (url.startsWith("https://")) AsyncImage(url, "Avatar de $name", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
     }
 }
 
 @Composable
-private fun PostCard(post: Post, saved: Boolean, busy: Boolean, bookmark: () -> Unit, open: () -> Unit) {
+internal fun PostCard(post: Post, saved: Boolean, busy: Boolean, bookmark: () -> Unit, open: () -> Unit, onProfile: (String) -> Unit) {
     val context = LocalContext.current
     Column(Modifier.fillMaxWidth().clickable(onClick = open).padding(horizontal = 18.dp, vertical = 16.dp)) {
-        if (post.repostedBy.isNotEmpty()) Text("↻ @${post.repostedBy} a republié", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(start = 54.dp, bottom = 8.dp))
+        if (post.repostedBy.isNotEmpty()) Text("↻ @${post.repostedBy} a republié", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(start = 54.dp, bottom = 8.dp).clickable { onProfile(post.repostedBy) })
         Row {
-            InitialAvatar(post.name.ifEmpty { post.handle }, post.avatar)
+            InitialAvatar(post.name.ifEmpty { post.handle }, Modifier.clickable(onClickLabel = "Voir le profil de @${post.handle}") { onProfile(post.handle) }, post.avatar)
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(post.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text(post.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).clickable { onProfile(post.handle) })
                     Text(dateLabel(post.timestamp), color = Muted, fontSize = 10.sp)
                 }
-                Text("@${post.handle} · ${post.source}", color = Muted, fontSize = 11.sp)
+                Text("@${post.handle} · ${post.source}", color = Muted, fontSize = 11.sp, modifier = Modifier.clickable { onProfile(post.handle) })
                 if (post.text.isNotBlank()) Text(post.text, fontSize = 14.sp, lineHeight = 21.sp, maxLines = 12, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp))
                 if (post.quote.isNotBlank()) Surface(shape = RoundedCornerShape(12.dp), color = Panel, modifier = Modifier.padding(top = 10.dp)) {
                     Text(post.quote, fontSize = 12.sp, lineHeight = 18.sp, maxLines = 5, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(12.dp))
@@ -324,7 +361,7 @@ private fun Metric(icon: ImageVector, count: Long?, label: String) {
         if (count != null) Text(" ${numberLabel(count)}", fontSize = 10.sp, color = Muted)
     }
 }
-private fun numberLabel(value: Long): String = when {
+internal fun numberLabel(value: Long): String = when {
     value >= 1_000_000 -> String.format(Locale.FRANCE, "%.1f M", value / 1_000_000.0)
     value >= 1_000 -> String.format(Locale.FRANCE, "%.1f k", value / 1_000.0)
     else -> value.toString()
@@ -353,9 +390,9 @@ private fun ImportDialog(busy: Boolean, onDismiss: () -> Unit, onImport: (String
 }
 
 @Composable
-private fun PostDialog(post: Post, dismiss: () -> Unit) {
+private fun PostDialog(post: Post, dismiss: () -> Unit, onProfile: (String) -> Unit) {
     val context = LocalContext.current
-    AlertDialog(onDismissRequest = dismiss, title = { Column { Text(post.name); Text("@${post.handle}", color = Muted, fontSize = 13.sp) } },
+    AlertDialog(onDismissRequest = dismiss, title = { Column(Modifier.clickable { onProfile(post.handle) }) { Text(post.name); Text("@${post.handle}", color = Muted, fontSize = 13.sp) } },
         text = { LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { SelectionContainer { Text(post.text, lineHeight = 23.sp) } }
             if (post.quote.isNotEmpty()) item { Text(post.quote, color = Muted) }
@@ -370,11 +407,11 @@ private fun PostDialog(post: Post, dismiss: () -> Unit) {
         } }, confirmButton = { TextButton(onClick = { browse(context, post.url) }) { Text("Ouvrir sur X ↗") } },
         dismissButton = { TextButton(onClick = dismiss) { Text("Fermer") } })
 }
-private fun browse(context: android.content.Context, url: String) {
-    if (!url.startsWith("https://")) return
+internal fun browse(context: android.content.Context, url: String) {
+    if (!url.startsWith("https://") && !url.startsWith("http://")) return
     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
         .onFailure { android.widget.Toast.makeText(context, "Aucune application pour ouvrir ce lien.", android.widget.Toast.LENGTH_SHORT).show() }
 }
-private fun share(context: android.content.Context, url: String) {
+internal fun share(context: android.content.Context, url: String) {
     runCatching { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, url) }, "Partager la publication")) }
 }

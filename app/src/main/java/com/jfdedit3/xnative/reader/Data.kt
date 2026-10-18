@@ -24,6 +24,15 @@ data class Post(
     val quote: String = "", val repostedBy: String = "", val source: String = "API"
 )
 @Serializable
+data class Profile(
+    val handle: String, val name: String, val description: String = "", val avatar: String = "",
+    val banner: String = "", val location: String = "", val website: String = "",
+    val websiteLabel: String = "", val joined: String = "", val followers: Long? = null,
+    val following: Long? = null, val statuses: Long? = null, val verified: Boolean = false,
+    val protected: Boolean = false
+)
+
+@Serializable
 data class Library(
     val accounts: List<String> = emptyList(), val feeds: Map<String, List<Post>> = emptyMap(),
     val imported: List<Post> = emptyList(), val saved: List<Post> = emptyList(), val rssOnly: Boolean = false
@@ -82,6 +91,21 @@ object PostParser {
         }
         return rows.flatMap(::flatten).distinctBy { it.id }
     }
+    fun profile(body: String): Profile {
+        val root = json.parseToJsonElement(body).jsonObject
+        val code = root.number("code") ?: 200
+        require(code == 200L) { "FxTwitter : ${root.str("message").ifBlank { "profil inaccessible ($code)" }}" }
+        val user = root["user"] as? JsonObject ?: error("Réponse de profil FxTwitter non reconnue.")
+        val handle = user.str("screen_name")
+        Links.handle(handle)
+        val website = user["website"] as? JsonObject
+        return Profile(handle, user.str("name").ifBlank { handle }, user.str("description"),
+            user.str("avatar_url"), user.str("banner_url"), user.str("location"),
+            website?.str("url").orEmpty(), website?.str("display_url").orEmpty(), user.str("joined"),
+            user.number("followers"), user.number("following"), user.number("statuses"),
+            ((user["verification"] as? JsonObject)?.get("verified") as? JsonPrimitive)?.booleanOrNull ?: false,
+            (user["protected"] as? JsonPrimitive)?.booleanOrNull ?: false)
+    }
     private fun plain(html: String) = html.replace(Regex("(?i)<br\\s*/?>|</p>"), "\n")
         .replace(Regex("<[^>]*>"), "").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
         .replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ").trim()
@@ -133,7 +157,7 @@ class FxClient(
     private val rssBase: String = "https://fxtwitter.com"
 ) {
     private fun get(url: String): String = client.newCall(Request.Builder().url(url)
-        .header("User-Agent", "Xnative/1.0 (Android RSS reader)").build()).execute().use { response ->
+        .header("User-Agent", "Xnative/1.1 (Android RSS reader)").build()).execute().use { response ->
         when (response.code) {
             204 -> return "{\"code\":200,\"results\":[]}"
             429 -> error("FxTwitter limite les requêtes. Réessayez dans quelques minutes.")
@@ -165,6 +189,7 @@ class FxClient(
             catch (_: Exception) { throw apiError }
         }
     }
+    fun profile(account: String): Profile = PostParser.profile(get("$apiBase/2/profile/${Links.handle(account)}"))
     fun status(link: String): Post = PostParser.api(get("$apiBase/status/${Links.postId(link)}")).firstOrNull()
         ?: error("Publication inaccessible.")
 }

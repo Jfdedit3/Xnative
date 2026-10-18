@@ -4,6 +4,8 @@ Application Android native de lecture de X/Twitter, en français, développée e
 
 ## Fonctionnalités
 
+- Profils de type X : bannière, avatar, bio, localisation, site web, date d’inscription, compteurs et badges fournis par FxTwitter.
+- Ouverture d’un profil depuis les auteurs, les republications et les abonnements, ou par saisie d’un pseudo ; onglets Publications/Médias et suivi local.
 - Fil chronologique fusionnant les comptes suivis localement, avec déduplication et filtre médias.
 - Ajout et retrait de comptes par pseudo, jusqu’à 30 abonnements.
 - Actualisation par bouton ou glissement vers le bas ; conservation du cache en cas d’erreur réseau.
@@ -43,7 +45,9 @@ Le workflow GitHub Actions **Android** exécute les tests, l’analyse Lint et l
 
 Dans **Abonnements**, ajouter un pseudo, par exemple `NASA`. Revenir dans **Votre fil**, puis actualiser pour charger les publications récentes. En cas d’échec lors de l’ajout, l’abonnement reste enregistré afin de pouvoir réessayer. Le bouton de lien permet d’importer une publication, par exemple `https://x.com/jack/status/20`. Le marque-page conserve une copie dans **Favoris**. **Explorer** recherche uniquement dans le cache local.
 
-Le réglage **Utiliser uniquement le RSS** s’applique lors de la prochaine actualisation. Les abonnements et favoris sont propres à Xnative et ne modifient pas un compte X.
+Touchez l’avatar, le nom ou le pseudo d’un auteur pour ouvrir son profil. Dans **Abonnements**, touchez un compte existant ou saisissez un pseudo puis **Voir le profil**. Le bouton **Suivre / Abonné** du profil gère uniquement les abonnements locaux. Les informations de profil sont chargées via l’API et gardées en mémoire pendant la session ; les erreurs de métadonnées et de publications sont affichées séparément.
+
+Le réglage **Publications via RSS uniquement** s’applique lors de la prochaine actualisation. Les abonnements et favoris sont propres à Xnative et ne modifient pas un compte X.
 
 ## Sources FxTwitter
 
@@ -53,6 +57,7 @@ Endpoints utilisés :
 | --- | --- |
 | Publications récentes d’un compte | `https://api.fxtwitter.com/2/profile/{handle}/statuses?count=30&safe=1` |
 | Flux RSS d’un compte | `https://fxtwitter.com/{handle}/feed.xml?count=30&safe=1` |
+| Informations d’un profil | `https://api.fxtwitter.com/2/profile/{handle}` |
 | Publication par identifiant | `https://api.fxtwitter.com/status/{id}` |
 
 Références : [API FxEmbed](https://docs.fxembed.com/api/introduction), [flux RSS et Atom](https://docs.fxembed.com/guide/advanced/rss-atom-feeds/), [code FxEmbed](https://github.com/FxEmbed/FxEmbed).
@@ -65,7 +70,8 @@ Xnative est un **lecteur** : publier, aimer, répondre, republier et s’authent
 
 - `Data.kt` : modèles, validation des liens, parseurs JSON/RSS et client HTTP.
 - `FeedViewModel.kt` : abonnements, import, actualisation et persistance locale.
+- `ProfileViewModel.kt` et `ProfileScreen.kt` : chargement indépendant des profils, navigation, en-tête et publications.
 - `MainActivity.kt` : navigation Compose, fil, recherche, favoris, abonnements et réception des partages.
-- `FxClientTest.kt` : validation des liens, API v1/v2, fils groupés, RSS, repli réseau, limites HTTP et cache.
+- `FxClientTest.kt` : validation des liens, API v1/v2, fils groupés, RSS, repli réseau, limites HTTP et cache. `ProfileTest.kt` vérifie les profils complets, privés, incomplets et les erreurs API.
 
 Les données locales sont stockées dans l’espace privé de l’application (`library.json`) ; aucune télémétrie n’est ajoutée. La désinstallation efface ces données. Les requêtes HTTP sont adressées à FxTwitter et aux hébergeurs des médias. Xnative est indépendant de X Corp et de FxTwitter.
