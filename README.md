@@ -2,9 +2,9 @@
 
 Application Android native de lecture et de téléchargement des médias X/Twitter via **FxTwitter / FxEmbed**, en français, développée en Kotlin avec Jetpack Compose et Material 3.
 
-**Version 1.2.1 · Android 7.0 minimum (API 24) · cible Android 15 (API 35)**
+**Version 1.2.2 · Android 7.0 minimum (API 24) · cible Android 15 (API 35)**
 
-Identifiant conservé : **`com.jfdedit3.xnative.reader`**. Aucun compte X ni clé API n’est nécessaire. Ce dépôt concerne uniquement Android ; la version Windows du document de référence ne fait pas partie de cette livraison.
+Nouvel identifiant : **`com.jfdedit3.xnative.android`**. Aucun compte X ni clé API n’est nécessaire. Ce dépôt concerne uniquement Android ; la version Windows du document de référence ne fait pas partie de cette livraison.
 
 ## Navigation
 
@@ -74,7 +74,7 @@ Prérequis : Android Studio récent, JDK 17 ou 21, SDK Android 35 et Build Tools
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Le workflow GitHub Actions **Android** exécute les tests et Lint puis produit l’artefact **Xnative-debug**. Les tests Robolectric téléchargent leurs environnements Android depuis Maven Central lors du premier passage. Les APK de développement sont signés avec une clé de test ; une distribution et des mises à jour durables nécessitent une clé de signature conservée par le propriétaire.
+Le workflow GitHub Actions **Android** exécute les tests et Lint puis produit l’artefact **Xnative-debug**. Les tests Robolectric téléchargent leurs environnements Android depuis Maven Central lors du premier passage. Les APK de développement utilisent désormais la même clé de test versionnée (`signing/xnative-debug.keystore`). Cette clé publique ne doit jamais signer une version de production ; une distribution de production nécessite une clé privée conservée par le propriétaire.
 
 ## Sources et limites
 
@@ -97,3 +97,7 @@ Les tests couvrent notamment les formats API/RSS, les curseurs, les noms stables
 ### Correctif 1.2.1
 
 Les cartes affichent tous les médias en grille. Le lecteur RSS récupère aussi les images et vidéos du contenu HTML, car FxTwitter ne déclare souvent que le premier média dans `enclosure`. Les doublons sont supprimés ; chaque vignette ouvre son média dans la visionneuse. Actualisez le fil pour recharger les publications déjà en cache.
+
+### Installation 1.2.2
+
+Le nouvel identifiant `com.jfdedit3.xnative.android` permet une installation à côté de l’ancienne application `com.jfdedit3.xnative.reader`, sans la désinstaller. Les deux applications ont des données séparées : les favoris de l’ancienne ne sont pas transférés automatiquement. Les futures compilations de développement conservent la même signature pour permettre les mises à jour de ce nouveau package.

@@ -104,7 +104,7 @@ fun SettingsScreen(model: FeedViewModel, preferences: Preferences, onBack: () ->
         item { HorizontalDivider(); Text("Notifications et diagnostic", color = Blue) }
         item { TextButton(onClick = permission) { Text("Autoriser les notifications") }; Option("Notification au démarrage", preferences.startupNotification) { value -> update { it.copy(startupNotification = value) } } }
         item { TextButton(onClick = { log = Diagnostics.read(context) }) { Text("Voir le dernier journal") }; TextButton(onClick = { export("dernier_lancement.log", Diagnostics.read(context)) }) { Text("Exporter le journal") }; TextButton(onClick = model::refresh) { Text("Relancer les requêtes du fil") } }
-        item { HorizontalDivider(); TextButton(onClick = gallery) { Text("Ouvrir les téléchargements") }; Text("Xnative 1.2.1 · Android natif · FxEmbed", color = Muted); Text("Paquet : ${context.packageName}", color = Muted, fontSize = 11.sp) }
+        item { HorizontalDivider(); TextButton(onClick = gallery) { Text("Ouvrir les téléchargements") }; Text("Xnative 1.2.2 · Android natif · FxEmbed", color = Muted); Text("Paquet : ${context.packageName}", color = Muted, fontSize = 11.sp) }
     }
     log?.let { AlertDialog(onDismissRequest = { log = null }, title = { Text("Journal") }, text = { LazyColumn { item { Text(it, fontSize = 10.sp) } } }, confirmButton = { TextButton(onClick = { log = null }) { Text("Fermer") } }) }
 }

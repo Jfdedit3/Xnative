@@ -8,11 +8,19 @@ android {
     namespace = "com.jfdedit3.xnative.reader"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.jfdedit3.xnative.reader"
+        applicationId = "com.jfdedit3.xnative.android"
         minSdk = 24
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.2.1"
+        versionCode = 5
+        versionName = "1.2.2"
+    }
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("signing/xnative-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
     buildFeatures { compose = true }
     testOptions { unitTests.isIncludeAndroidResources = true }
