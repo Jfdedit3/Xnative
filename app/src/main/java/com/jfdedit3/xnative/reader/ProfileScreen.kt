@@ -69,20 +69,23 @@ internal fun ProfileScreen(
                         LinearProgressIndicator(Modifier.fillMaxWidth())
                         Text("Chargement de tous les médias : ${state.posts.sumOf { it.media.size }} médias", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
                         TextButton(onClick = onStopMedia) { Text("Arrêter le chargement") }
-                    } else if (!state.mediaComplete) TextButton(onClick = onMedia) { Text("Charger tous les médias / réessayer") }
+                    } else if (!state.mediaComplete) TextButton(onClick = onMedia) { Text("Charger les médias disponibles / réessayer") }
                     TabRow(selectedTabIndex = mediaTab, containerColor = Ink, contentColor = Blue) {
                         listOf("Publications", "Images", "Vidéos").forEachIndexed { index, name -> Tab(selected = mediaTab == index, onClick = { mediaTab = index }, text = { Text(name) }) }
                     }
-                    state.postsError?.let { ProfileError(it, !state.loading, onRefresh) }
+                    if (mediaTab == 0) state.postsError?.let { ProfileError(it, !state.loading, onRefresh) }
+                    state.mediaNotice?.let { Text(it, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(16.dp)) }
+                    state.mediaError?.let { ProfileError(it, !state.mediaLoading && !state.loading, onMedia) }
                 }
                 if (posts.isEmpty()) item(key = "empty") {
                     Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(if (user.protected) Icons.Outlined.Lock else Icons.Outlined.DynamicFeed, null, tint = Muted, modifier = Modifier.size(32.dp))
                         Spacer(Modifier.height(14.dp))
                         Text(when {
+                            state.mediaLoading -> "Chargement des médias…"
                             state.loading -> "Chargement des publications…"
                             user.protected -> "Ce compte est protégé"
-                            state.postsError != null -> "Aucune publication disponible hors connexion"
+                            mediaTab == 0 && state.postsError != null -> "Aucune publication disponible hors connexion"
                             mediaTab > 0 -> "Aucun média dans les publications chargées"
                             else -> "Aucune publication disponible"
                         }, color = Muted)

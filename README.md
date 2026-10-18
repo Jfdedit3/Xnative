@@ -2,7 +2,7 @@
 
 Application Android native de lecture et de téléchargement des médias X/Twitter via **FxTwitter / FxEmbed**, en français, développée en Kotlin avec Jetpack Compose et Material 3.
 
-**Version 1.2.2 · Android 7.0 minimum (API 24) · cible Android 15 (API 35)**
+**Version 1.2.3 · Android 7.0 minimum (API 24) · cible Android 15 (API 35)**
 
 Nouvel identifiant : **`com.jfdedit3.xnative.android`**. Aucun compte X ni clé API n’est nécessaire. Ce dépôt concerne uniquement Android ; la version Windows du document de référence ne fait pas partie de cette livraison.
 
@@ -101,3 +101,7 @@ Les cartes affichent tous les médias en grille. Le lecteur RSS récupère aussi
 ### Installation 1.2.2
 
 Le nouvel identifiant `com.jfdedit3.xnative.android` permet une installation à côté de l’ancienne application `com.jfdedit3.xnative.reader`, sans la désinstaller. Les deux applications ont des données séparées : les favoris de l’ancienne ne sont pas transférés automatiquement. Les futures compilations de développement conservent la même signature pour permettre les mises à jour de ce nouveau package.
+
+### Correctif profils 1.2.3
+
+Le parcours des médias s’arrête sur une page vide même si FxTwitter renvoie encore un curseur. Une erreur ultérieure conserve les médias chargés et le curseur pour reprendre la même page ; elle ne présente plus le compte comme introuvable. Si le flux de médias initial est indisponible, les publications accessibles puis le RSS récent servent de repli, avec une indication explicite de cette limite. La signature et le package de la version 1.2.2 sont conservés.

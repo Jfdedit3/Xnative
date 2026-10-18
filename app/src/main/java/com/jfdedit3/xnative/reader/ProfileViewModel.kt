@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 data class ProfileState(
     val account: String = "", val user: Profile? = null, val posts: List<Post> = emptyList(),
     val loading: Boolean = false, val error: String? = null, val postsError: String? = null,
+    val mediaError: String? = null, val mediaNotice: String? = null,
     val next: String? = null, val mediaLoading: Boolean = false, val mediaComplete: Boolean = false
 )
 class ProfileViewModel(application: Application) : AndroidViewModel(application) {
@@ -20,9 +21,11 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
     private var request: Job? = null
     private var mediaJob: Job? = null
     private var generation = 0
+    private var mediaPager = ProfileMediaPager(client)
     fun load(account: String, library: Library) {
         val handle = Links.handle(account); val ticket = ++generation
         request?.cancel(); mediaJob?.cancel()
+        mediaPager = ProfileMediaPager(client)
         val local = (library.feeds[handle].orEmpty() + library.timeline().filter { it.handle.equals(handle, true) } + library.saved.filter { it.handle.equals(handle, true) }).distinctBy { it.id }
         _state.value = ProfileState(handle, posts = local, loading = true)
         request = viewModelScope.launch {
@@ -38,7 +41,7 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
                         if (library.rssOnly) PostPage(client.timeline(handle, true))
                         else client.page(handle, count = SettingsStore.get(context).state.value.postsPerAccount)
                     }
-                    _state.value = _state.value.copy(posts = (page.posts + _state.value.posts).distinctBy { it.id }.sortedByDescending { it.timestamp }, next = page.next, mediaComplete = false)
+                    _state.value = _state.value.copy(posts = (page.posts + _state.value.posts).distinctBy { it.id }.sortedByDescending { it.timestamp }, next = page.next, mediaComplete = false, postsError = null)
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { _state.value = _state.value.copy(postsError = Diagnostics.error(context, error)) }
                 save()
@@ -59,7 +62,7 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
         request = viewModelScope.launch {
             try {
                 val page = withContext(Dispatchers.IO) { client.page(current.account, cursor, SettingsStore.get(context).state.value.postsPerAccount) }
-                _state.value = _state.value.copy(posts = (_state.value.posts + page.posts).distinctBy { it.id }.sortedByDescending { it.timestamp }, next = page.next?.takeIf { it != cursor })
+                _state.value = _state.value.copy(posts = (_state.value.posts + page.posts).distinctBy { it.id }.sortedByDescending { it.timestamp }, next = page.next?.takeIf { it != cursor }, postsError = null)
                 save()
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { _state.value = _state.value.copy(postsError = Diagnostics.error(context, error)) }
@@ -68,22 +71,22 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
     }
     fun loadAllMedia() {
         if (_state.value.mediaLoading || _state.value.mediaComplete || _state.value.loading) return
-        val ticket = generation; val handle = _state.value.account
-        _state.value = _state.value.copy(mediaLoading = true)
+        val ticket = generation; val handle = _state.value.account; val pager = mediaPager
+        _state.value = _state.value.copy(mediaLoading = true, mediaError = null)
         mediaJob = viewModelScope.launch {
             try {
-                val seen = mutableSetOf<String>(); var cursor: String? = null
-                do {
+                while (!pager.complete) {
                     ensureActive()
-                    val page = withContext(Dispatchers.IO) { client.page(handle, cursor, 100, media = true) }
-                    _state.value = _state.value.copy(posts = (_state.value.posts + page.posts).distinctBy { it.id }.sortedByDescending { it.timestamp })
-                    cursor = page.next
-                    if (cursor != null && !seen.add(cursor)) error("Le serveur répète son curseur. Rechargez les médias pour réessayer.")
+                    val page = withContext(Dispatchers.IO) { pager.next(handle) }
+                    _state.value = _state.value.copy(posts = (page.posts + _state.value.posts).distinctBy { it.id }.sortedByDescending { it.timestamp }, mediaNotice = pager.notice, mediaError = null)
                     save()
-                } while (cursor != null)
+                }
                 _state.value = _state.value.copy(mediaComplete = true); save()
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { _state.value = _state.value.copy(postsError = Diagnostics.error(context, error)) }
+            catch (error: Exception) {
+                Diagnostics.error(context, error)
+                _state.value = _state.value.copy(mediaError = "Impossible de charger la suite des médias pour le moment. Les médias déjà chargés restent disponibles. Réessayez pour reprendre.")
+            }
             finally { if (generation == ticket) _state.value = _state.value.copy(mediaLoading = false) }
         }
     }
