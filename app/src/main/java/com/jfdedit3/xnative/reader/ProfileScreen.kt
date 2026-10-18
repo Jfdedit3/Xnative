@@ -98,7 +98,7 @@ private fun ProfileHeader(user: Profile, followed: Boolean, busy: Boolean, onFol
         if (user.banner.startsWith("https://")) AsyncImage(user.banner, "Bannière de ${user.name}", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
     }
     Row(Modifier.fillMaxWidth().height(76.dp).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.offset(y = (-24).dp).size(100.dp).border(4.dp, Ink, CircleShape).padding(4.dp).clip(CircleShape)) {
+        Box(Modifier.offset(y = (-24).dp).requiredSize(100.dp).border(4.dp, Ink, CircleShape).padding(4.dp).clip(CircleShape)) {
             InitialAvatar(user.name, Modifier.fillMaxSize(), user.avatar)
         }
         Spacer(Modifier.weight(1f))
