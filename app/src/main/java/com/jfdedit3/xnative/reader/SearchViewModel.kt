@@ -7,8 +7,9 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-data class SearchState(val query: String = "", val accounts: List<Profile> = emptyList(), val posts: List<Post> = emptyList(), val next: String? = null, val loading: Boolean = false, val error: String? = null)
-class SearchViewModel(application: Application) : AndroidViewModel(application) {
+data class SearchState(val query: String = "", val accounts: List<Profile> = emptyList(), val posts: List<Post> = emptyList(), val next: String? = null, val loading: Boolean = false, val error: String? = null, val directPost: Boolean = false)
+class SearchViewModel(application: Application, private val client: FxClient) : AndroidViewModel(application) {
+    constructor(application: Application) : this(application, FxClient())
     private val _state = MutableStateFlow(SearchState()); val state = _state.asStateFlow()
     private var request: Job? = null
     private val cursors = mutableSetOf<String>()
@@ -16,19 +17,23 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
         if (more && (_state.value.loading || _state.value.next == null)) return
         request?.cancel()
         if (!more) cursors.clear()
+        val postLink = runCatching { Links.postId(query) }.isSuccess
         val previous = _state.value
-        _state.value = if (more) previous.copy(loading = true, error = null) else SearchState(query, loading = true)
+        _state.value = if (more) previous.copy(loading = true, error = null) else SearchState(query, loading = true, directPost = postLink)
         request = viewModelScope.launch {
             try {
-                val client = FxClient().apply { retries = SettingsStore.get(getApplication()).state.value.retries }
-                if (posts) {
+                client.retries = SettingsStore.get(getApplication()).state.value.retries
+                if (postLink) {
+                    val post = withContext(Dispatchers.IO) { client.status(query) }
+                    _state.value = _state.value.copy(posts = listOf(post), accounts = emptyList(), next = null)
+                } else if (posts) {
                     val page = withContext(Dispatchers.IO) { client.search(query, if (more) previous.next else null) }
                     _state.value = _state.value.copy(posts = ((if (more) previous.posts else emptyList()) + page.posts).distinctBy { it.id }, next = page.next?.takeIf { cursors.add(it) })
                 } else _state.value = _state.value.copy(accounts = withContext(Dispatchers.IO) { client.accounts(query) })
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
                 val details = Diagnostics.error(getApplication(), error)
-                if (posts && !more) {
+                if (posts && !more && !postLink) {
                     val local = withContext(Dispatchers.IO) {
                         val library = runCatching { LibraryStorage.read(getApplication()) }.getOrDefault(Library())
                         val all = (library.timeline() + library.saved + ProfileCache.load(getApplication()).values.flatMap { it.posts }).distinctBy { it.id }

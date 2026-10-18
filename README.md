@@ -2,7 +2,7 @@
 
 Application Android native de lecture et de téléchargement des médias X/Twitter via **FxTwitter / FxEmbed**, en français, développée en Kotlin avec Jetpack Compose et Material 3.
 
-**Version 1.2.3 · Android 7.0 minimum (API 24) · cible Android 15 (API 35)**
+**Version 1.2.4 · Android 7.0 minimum (API 24) · cible Android 15 (API 35)**
 
 Nouvel identifiant : **`com.jfdedit3.xnative.android`**. Aucun compte X ni clé API n’est nécessaire. Ce dépôt concerne uniquement Android ; la version Windows du document de référence ne fait pas partie de cette livraison.
 
@@ -105,3 +105,9 @@ Le nouvel identifiant `com.jfdedit3.xnative.android` permet une installation à 
 ### Correctif profils 1.2.3
 
 Le parcours des médias s’arrête sur une page vide même si FxTwitter renvoie encore un curseur. Une erreur ultérieure conserve les médias chargés et le curseur pour reprendre la même page ; elle ne présente plus le compte comme introuvable. Si le flux de médias initial est indisponible, les publications accessibles puis le RSS récent servent de repli, avec une indication explicite de cette limite. La signature et le package de la version 1.2.2 sont conservés.
+
+### Correctif recherche 1.2.4
+
+Un lien de publication X/Twitter/FxTwitter est chargé directement via son identifiant et affiché seul dans Recherche, y compris lorsque le mode Comptes était sélectionné. Le résultat n’est plus ajouté au fil ni perdu dans son tri chronologique. Le bouton Rechercher et la touche Recherche du clavier suivent le même chemin. Les liens partagés et le bouton Ouvrir un lien affichent également la publication dans Recherche. Si le post est inaccessible, une erreur est affichée sans résultats de cache sans rapport. Le package et la signature restent inchangés.
+
+Dans les profils, Images et Vidéos affichent uniquement les médias du type sélectionné publiés par le compte, sans reposts, y compris lorsque l’API omet le marqueur de repost mais indique un autre auteur. Le téléchargement des médias chargés respecte l’onglet actif. Publications conserve son contenu habituel.

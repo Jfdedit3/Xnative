@@ -29,6 +29,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -73,8 +76,8 @@ class MainActivity : ComponentActivity() {
         Notifications.channels(this)
         lifecycleScope.launch(Dispatchers.IO) {
             DownloadHistory.recover(this@MainActivity)
-            runCatching { if (Build.VERSION.SDK_INT >= 29 || ContextCompat.checkSelfPermission(this@MainActivity, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) MediaFiles.export(this@MainActivity, "dernier_lancement.log", "Démarrage Xnative 1.2.3 · ${java.time.Instant.now()}", "text/plain") }
-            Diagnostics.log(this@MainActivity, "Démarrage Xnative 1.2.3 · Android ${Build.VERSION.SDK_INT}")
+            runCatching { if (Build.VERSION.SDK_INT >= 29 || ContextCompat.checkSelfPermission(this@MainActivity, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) MediaFiles.export(this@MainActivity, "dernier_lancement.log", "Démarrage Xnative 1.2.4 · ${java.time.Instant.now()}", "text/plain") }
+            Diagnostics.log(this@MainActivity, "Démarrage Xnative 1.2.4 · Android ${Build.VERSION.SDK_INT}")
             if (SettingsStore.get(this@MainActivity).state.value.startupNotification) Notifications.post(this@MainActivity, 1, "Xnative est prêt", "Consultation, téléchargements et flux RSS", "app")
         }
         setContent {
@@ -174,10 +177,13 @@ private fun XnativeApp(model: FeedViewModel) {
     LaunchedEffect(profileHandle, tab == 4, library.rssOnly) { if (tab == 4 && profileHandle.isNotEmpty()) profiles.load(profileHandle, library) else profiles.close() }
     LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); model.clearMessage() } }
     LaunchedEffect(requestedPage) { requestedPage?.let { tab = if (it == "downloads") 2 else 1; NavigationRequests.page.value = null } }
-    LaunchedEffect(incoming, busy) {
-        if (incoming != null && !busy) {
+    LaunchedEffect(incoming) {
+        if (incoming != null) {
             val value = incoming!!; NavigationRequests.link.value = null
-            if (runCatching { Links.postId(value) }.isSuccess) { model.importPost(value); tab = 1 }
+            if (runCatching { Links.postId(value) }.isSuccess) {
+                query = value; searchPosts = true; settings = false; selected = null
+                search.search(value, true); tab = 3
+            }
             else showProfile(Regex("https://[^\\s<>]+").find(value)?.value ?: value)
         }
     }
@@ -191,6 +197,12 @@ private fun XnativeApp(model: FeedViewModel) {
         }.distinctUntilChanged().collect { atEnd -> if (atEnd) model.loadMore() }
     }
     BackHandler(enabled = selected == null && viewer == null && (settings || tab == 4 && profileHandle.isNotEmpty())) { if (settings) settings = false else backProfile() }
+    fun submitSearch() {
+        if (query.isBlank()) return
+        if (query.contains("https://")) NavigationRequests.link.value = query
+        else if (tab == 4) showProfile(query)
+        else search.search(query, searchPosts)
+    }
     val titles = listOf("Favoris", "Actus", "Galerie", "Recherche", "Profil")
     val icons = listOf(Icons.Outlined.StarOutline, Icons.Outlined.Home, Icons.Outlined.PhotoLibrary, Icons.Outlined.Search, Icons.Outlined.PersonOutline)
     Scaffold(containerColor = Ink, snackbarHost = { if (tab != 4 || profileHandle.isBlank() || settings) SnackbarHost(snackbar) }, topBar = {
@@ -221,18 +233,18 @@ private fun XnativeApp(model: FeedViewModel) {
                     PullToRefreshBox(busy, model::refreshCards, Modifier.weight(1f)) { Accounts(library, busy, model, showProfile) }
                 }
                 tab == 3 || tab == 4 -> {
-                    OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(16.dp), label = { Text("Pseudo, recherche ou lien X") }, singleLine = true)
+                    OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(16.dp), label = { Text("Pseudo, recherche ou lien X") }, singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { submitSearch() }))
                     Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Button(onClick = { if (query.contains("https://")) NavigationRequests.link.value = query else if (tab == 4) showProfile(query) else search.search(query, searchPosts) }, enabled = query.isNotBlank()) { Text(if (tab == 4) "Voir le profil" else "Rechercher") }
-                        if (tab == 3) TextButton(onClick = { searchPosts = !searchPosts }) { Text(if (searchPosts) "Posts" else "Comptes") }
+                        Button(onClick = { submitSearch() }, enabled = query.isNotBlank()) { Text(if (tab == 4) "Voir le profil" else "Rechercher") }
+                        if (tab == 3) TextButton(onClick = { searchPosts = !searchPosts }) { Text(if (searchPosts || searchState.directPost) "Posts" else "Comptes") }
                     }
                     if (searchState.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                     searchState.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) }
                     LazyColumn(Modifier.weight(1f)) {
-                        if (!searchPosts) items(searchState.accounts, key = { it.handle }) { user -> ListItem(headlineContent = { Text(user.name) }, supportingContent = { Text("@${user.handle}") }, leadingContent = { InitialAvatar(user.name, url = user.avatar) }, modifier = Modifier.clickable { showProfile(user.handle) }) }
+                        if (!searchPosts && !searchState.directPost) items(searchState.accounts, key = { it.handle }) { user -> ListItem(headlineContent = { Text(user.name) }, supportingContent = { Text("@${user.handle}") }, leadingContent = { InitialAvatar(user.name, url = user.avatar) }, modifier = Modifier.clickable { showProfile(user.handle) }) }
                         else items(searchState.posts, key = { it.id }) { post -> PostCard(post, library.saved.any { it.id == post.id }, busy, { model.bookmark(post) }, { selected = post }, showProfile) }
-                        if (searchState.next != null && searchPosts) item { TextButton(onClick = { search.search(query, true, true) }, enabled = !searchState.loading) { Text("Charger la suite") } }
-                        item { TextButton(onClick = { showProfile(query) }, enabled = query.isNotBlank()) { Text("Ouvrir directement ce pseudo") } }
+                        if (searchState.next != null && searchPosts && !searchState.directPost) item { TextButton(onClick = { search.search(query, true, true) }, enabled = !searchState.loading) { Text("Charger la suite") } }
+                        if (!searchState.directPost) item { TextButton(onClick = { showProfile(query) }, enabled = query.isNotBlank()) { Text("Ouvrir directement ce pseudo") } }
                     }
                 }
                 else -> {

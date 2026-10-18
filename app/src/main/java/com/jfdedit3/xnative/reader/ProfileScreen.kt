@@ -42,7 +42,7 @@ internal fun ProfileScreen(
     var mediaTab by rememberSaveable(state.account) { mutableIntStateOf(0) }
     LaunchedEffect(mediaTab, state.loading) { if (mediaTab > 0 && !state.loading && !state.mediaComplete) onMedia() }
     val user = state.user ?: Profile(state.account, state.account)
-    val posts = state.posts.filter { mediaTab == 0 || it.media.any { media -> media.video == (mediaTab == 2) } }
+    val posts = profilePostsForTab(state.posts, state.account, mediaTab)
     Scaffold(containerColor = Ink, snackbarHost = { SnackbarHost(snackbar) }, topBar = {
         TopAppBar(title = {
             Column {
@@ -62,12 +62,12 @@ internal fun ProfileScreen(
                     if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Blue)
                     state.error?.let { ProfileError(it, !state.loading, onRefresh) }
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { MediaUi.downloads.value = state.posts.flatMap { post -> post.media.map { DownloadItem(post.handle, post.id, it) } }.distinctBy { it.id } }, enabled = !state.mediaLoading && state.posts.any { it.media.isNotEmpty() }) { Text("Télécharger les médias chargés") }
+                        TextButton(onClick = { MediaUi.downloads.value = posts.flatMap { post -> post.media.map { DownloadItem(post.handle, post.id, it) } }.distinctBy { it.id } }, enabled = !state.mediaLoading && posts.any { it.media.isNotEmpty() }) { Text("Télécharger les médias chargés") }
                         TextButton(onClick = { browse(context, "https://fxtwitter.com/${state.account}/feed.xml") }) { Text("Flux RSS ↗") }
                     }
                     if (state.mediaLoading) {
                         LinearProgressIndicator(Modifier.fillMaxWidth())
-                        Text("Chargement de tous les médias : ${state.posts.sumOf { it.media.size }} médias", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
+                        Text("Chargement de tous les médias : ${posts.sumOf { it.media.size }} médias", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
                         TextButton(onClick = onStopMedia) { Text("Arrêter le chargement") }
                     } else if (!state.mediaComplete) TextButton(onClick = onMedia) { Text("Charger les médias disponibles / réessayer") }
                     TabRow(selectedTabIndex = mediaTab, containerColor = Ink, contentColor = Blue) {
@@ -86,14 +86,15 @@ internal fun ProfileScreen(
                             state.loading -> "Chargement des publications…"
                             user.protected -> "Ce compte est protégé"
                             mediaTab == 0 && state.postsError != null -> "Aucune publication disponible hors connexion"
-                            mediaTab > 0 -> "Aucun média dans les publications chargées"
+                            mediaTab == 1 -> "Aucune image publiée par ce compte dans les publications chargées"
+                            mediaTab == 2 -> "Aucune vidéo publiée par ce compte dans les publications chargées"
                             else -> "Aucune publication disponible"
                         }, color = Muted)
                         if (user.protected) Text("FxTwitter peut uniquement fournir les publications accessibles publiquement.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                     }
                 }
                 items(posts, key = { it.id }) { post ->
-                    PostCard(if (mediaTab == 0) post else post.copy(media = post.media.filter { it.video == (mediaTab == 2) }), library.saved.any { it.id == post.id }, busy, { onBookmark(post) }, { onPost(post) }, onProfile)
+                    PostCard(post, library.saved.any { it.id == post.id }, busy, { onBookmark(state.posts.firstOrNull { it.id == post.id } ?: post) }, { onPost(post) }, onProfile)
                     HorizontalDivider(color = Line)
                 }
                 if (mediaTab == 0 && state.next != null) item { TextButton(onClick = onMore, enabled = !state.loading) { Text("Charger les publications précédentes") } }
