@@ -2,7 +2,7 @@
 
 Application Android native de lecture et de téléchargement des médias X/Twitter via **FxTwitter / FxEmbed**, en français, développée en Kotlin avec Jetpack Compose et Material 3.
 
-**Version 1.2.4 · Android 7.0 minimum (API 24) · cible Android 15 (API 35)**
+**Version 1.3.0 · Android 7.0 minimum (API 24) · cible Android 15 (API 35)**
 
 Nouvel identifiant : **`com.jfdedit3.xnative.android`**. Aucun compte X ni clé API n’est nécessaire. Ce dépôt concerne uniquement Android ; la version Windows du document de référence ne fait pas partie de cette livraison.
 
@@ -113,3 +113,11 @@ Un lien de publication X/Twitter/FxTwitter est chargé directement via son ident
 Dans les profils, Images et Vidéos affichent uniquement les médias du type sélectionné publiés par le compte, sans reposts, y compris lorsque l’API omet le marqueur de repost mais indique un autre auteur. Le téléchargement des médias chargés respecte l’onglet actif. Publications conserve son contenu habituel.
 
 La Galerie peut aussi lire les images et vidéos déjà présentes dans un dossier choisi via « Lire un dossier existant », avec ses sous-dossiers et un bouton Actualiser. La lecture est autorisée par le sélecteur Android et conservée entre les lancements. Le dossier de téléchargement personnalisé sert de source par défaut ; choisir un dossier pour la galerie ne change pas la destination des téléchargements. Les fichiers externes restent sur place et ne sont pas ajoutés à l’historique des transferts. Ils apparaissent par dossier, avec aperçu, taille et visionneuse ; sans métadonnées, le texte du post et son auteur d’origine ne peuvent pas être reconstruits à partir d’un fichier seul. Sur Android 11+, si le sélecteur bloque la racine Download, sélectionnez le sous-dossier contenant les médias.
+
+### Lecteur vidéo 1.3.0
+
+Commandes mobiles inspirées du [lecteur Android de Nart](https://github.com/Jfdedit3/Nart) : lecture/pause centrale et ±5 secondes, double appui sur les côtés pour avancer/reculer, glissement vertical à gauche pour la luminosité et à droite pour le volume, maintien puis glissement horizontal pour parcourir la vidéo. Barre de position avec durée et tampon, vitesse de 0,25× à 2×, boucle, cadrage adapté/rempli et verrouillage tactile. Les commandes se masquent automatiquement pendant la lecture.
+
+Le bouton Plein écran ouvre un écran immersif avec changement d’orientation et image dans l’image (Android 8+ et appareil compatible). Quitter cet écran rend la position et la vitesse au lecteur de la publication. Android 12+ active automatiquement le PiP en quittant l’écran immersif pendant la lecture ; les versions antérieures utilisent le signal de départ de l’activité. Les vidéos locales de la galerie sont prises en charge via leurs URI autorisées. La luminosité est limitée à la fenêtre du lecteur et restaurée à sa fermeture ; aucune autorisation de modification globale de luminosité n’est nécessaire. La pause volontaire reste respectée au retour de l’arrière-plan. Le moteur gère le focus audio et met en pause à la déconnexion d’un casque.
+
+Cette adaptation utilise Media3 et Compose, sans embarquer la WebView ni les fonctions propres aux épisodes de Nart. Le crédit et la licence ISC de Nart sont fournis dans `app/src/main/assets/Nart-NOTICE.txt`. Les gestes, codecs, orientation et PiP restent à vérifier sur appareil réel. Le package et la signature des versions 1.2.2+ sont conservés.

@@ -24,17 +24,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.compose.AsyncImage
@@ -80,7 +71,7 @@ fun MediaViewer(selection: MediaSelection, preferences: Preferences, close: () -
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     TextButton(enabled = pager.currentPage > 0, onClick = { scope.launch { zoomed = false; if (preferences.animations) pager.animateScrollToPage(pager.currentPage - 1) else pager.scrollToPage(pager.currentPage - 1) } }) { Text("Précédent") }
-                    Text("Pincez ou double-touchez pour zoomer", color = Muted, fontSize = androidx.compose.ui.unit.TextUnit.Unspecified, modifier = Modifier.weight(1f).padding(8.dp))
+                    Text(if (selection.items[pager.currentPage].media.video) "Double appui : ±5 s · glissez verticalement : luminosité / volume" else "Pincez ou double-touchez pour zoomer", color = Muted, fontSize = androidx.compose.ui.unit.TextUnit.Unspecified, modifier = Modifier.weight(1f).padding(8.dp))
                     TextButton(enabled = pager.currentPage < selection.items.lastIndex, onClick = { scope.launch { zoomed = false; if (preferences.animations) pager.animateScrollToPage(pager.currentPage + 1) else pager.scrollToPage(pager.currentPage + 1) } }) { Text("Suivant") }
                 }
             }
@@ -110,26 +101,4 @@ private fun ZoomImage(url: String, animations: Boolean, active: Boolean, onZoom:
                 } while (event.changes.any { it.pressed })
             }
         }.graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = pan.x; translationY = pan.y })
-}
-@Composable
-fun VideoPlayer(url: String, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    val lifecycle = LocalLifecycleOwner.current
-    var error by remember(url) { mutableStateOf<String?>(null) }
-    val player = remember(url) { ExoPlayer.Builder(context).build().apply {
-        repeatMode = Player.REPEAT_MODE_ONE; setMediaItem(MediaItem.fromUri(url)); prepare(); playWhenReady = true
-        addListener(object : Player.Listener { override fun onPlayerError(value: PlaybackException) { error = "Lecture impossible : ${value.errorCodeName}" } })
-    } }
-    DisposableEffect(player, lifecycle) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) player.pause()
-            if (event == Lifecycle.Event.ON_RESUME) player.play()
-        }
-        lifecycle.lifecycle.addObserver(observer)
-        onDispose { lifecycle.lifecycle.removeObserver(observer); player.release() }
-    }
-    Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
-        AndroidView(factory = { PlayerView(it).apply { this.player = player; useController = true } }, modifier = Modifier.fillMaxSize())
-        error?.let { Text(it, color = Color.White, modifier = Modifier.background(Color.Black).padding(12.dp)) }
-    }
 }

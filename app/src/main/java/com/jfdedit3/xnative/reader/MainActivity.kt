@@ -76,8 +76,8 @@ class MainActivity : ComponentActivity() {
         Notifications.channels(this)
         lifecycleScope.launch(Dispatchers.IO) {
             DownloadHistory.recover(this@MainActivity)
-            runCatching { if (Build.VERSION.SDK_INT >= 29 || ContextCompat.checkSelfPermission(this@MainActivity, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) MediaFiles.export(this@MainActivity, "dernier_lancement.log", "Démarrage Xnative 1.2.4 · ${java.time.Instant.now()}", "text/plain") }
-            Diagnostics.log(this@MainActivity, "Démarrage Xnative 1.2.4 · Android ${Build.VERSION.SDK_INT}")
+            runCatching { if (Build.VERSION.SDK_INT >= 29 || ContextCompat.checkSelfPermission(this@MainActivity, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) MediaFiles.export(this@MainActivity, "dernier_lancement.log", "Démarrage Xnative 1.3.0 · ${java.time.Instant.now()}", "text/plain") }
+            Diagnostics.log(this@MainActivity, "Démarrage Xnative 1.3.0 · Android ${Build.VERSION.SDK_INT}")
             if (SettingsStore.get(this@MainActivity).state.value.startupNotification) Notifications.post(this@MainActivity, 1, "Xnative est prêt", "Consultation, téléchargements et flux RSS", "app")
         }
         setContent {
