@@ -1,6 +1,7 @@
 package com.jfdedit3.xnative.reader
 
 internal object VideoPlaybackRules {
+    fun playAfterToggle(playWhenReady: Boolean, ended: Boolean): Boolean = ended || !playWhenReady
     fun seek(position: Long, delta: Long, duration: Long): Long =
         (position.toDouble() + delta.toDouble()).coerceIn(0.0, duration.coerceAtLeast(0).toDouble()).toLong()
     fun drag(position: Long, deltaX: Float, width: Int, duration: Long): Long =

@@ -4,6 +4,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class VideoPlaybackRulesTest {
+    @Test fun replayAtEndStartsPlaybackEvenIfPlayWhenReadyWasStillTrue() {
+        assertTrue(VideoPlaybackRules.playAfterToggle(playWhenReady = true, ended = true))
+        assertTrue(VideoPlaybackRules.playAfterToggle(playWhenReady = false, ended = true))
+        assertTrue(VideoPlaybackRules.playAfterToggle(playWhenReady = false, ended = false))
+        assertFalse(VideoPlaybackRules.playAfterToggle(playWhenReady = true, ended = false))
+    }
     @Test fun fiveSecondSeekingNeverLeavesThePlayableRange() {
         assertEquals(0L, VideoPlaybackRules.seek(2000, -5000, 30000))
         assertEquals(30000L, VideoPlaybackRules.seek(28000, 5000, 30000))

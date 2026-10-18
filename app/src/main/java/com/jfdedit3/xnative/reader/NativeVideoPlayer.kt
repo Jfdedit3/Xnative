@@ -108,7 +108,8 @@ fun VideoPlayer(
     val currentPip by rememberUpdatedState(inPip)
     val fullScreenLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) result.data?.let { data ->
-            player.seekTo(data.getLongExtra("position", player.currentPosition))
+            val target = data.getLongExtra("position", player.currentPosition)
+            player.seekTo(target); position = target
             speed = data.getFloatExtra("speed", speed).coerceIn(0.25f, 2f); player.setPlaybackSpeed(speed)
             wantedPlaying = data.getBooleanExtra("playing", false); player.playWhenReady = wantedPlaying
         }
@@ -125,8 +126,10 @@ fun VideoPlayer(
         interaction++
     }
     fun togglePlayback() {
-        if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
-        wantedPlaying = !player.playWhenReady; player.playWhenReady = wantedPlaying; touch()
+        val ended = player.playbackState == Player.STATE_ENDED
+        wantedPlaying = VideoPlaybackRules.playAfterToggle(player.playWhenReady, ended)
+        if (ended) { player.seekTo(0); position = 0 }
+        player.playWhenReady = wantedPlaying; touch()
     }
     DisposableEffect(player, lifecycle) {
         val originalBrightness = window?.attributes?.screenBrightness
@@ -195,7 +198,7 @@ fun VideoPlayer(
                     seekPreview = VideoPlaybackRules.drag(dragStartPosition, dragX, size.width, duration)
                     message("${VideoPlaybackRules.time(seekPreview)} / ${VideoPlaybackRules.time(duration)}")
                 }
-            }, onDragEnd = { if (seeking) player.seekTo(seekPreview); seeking = false; interaction++ }, onDragCancel = { seeking = false })
+            }, onDragEnd = { if (seeking) { player.seekTo(seekPreview); position = seekPreview }; seeking = false; interaction++ }, onDragCancel = { seeking = false })
         }
     Box(modifier.background(Color.Black)) {
         AndroidView(factory = { PlayerView(it).apply { this.player = player; useController = false; setKeepContentOnPlayerReset(true) } },
@@ -225,7 +228,7 @@ fun VideoPlayer(
                     IconButton(onClick = { seek(5000); touch() }, enabled = duration > 0, modifier = Modifier.size(52.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape)) { Icon(Icons.Outlined.Forward5, "Avancer de 5 secondes", tint = Color.White, modifier = Modifier.size(32.dp)) }
                 }
                 Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f)))).padding(12.dp).navigationBarsPadding()) {
-                    Slider(value = (if (seeking) seekPreview else position).coerceIn(0, duration.coerceAtLeast(1)).toFloat(), onValueChange = { seeking = true; seekPreview = it.toLong(); interaction++ }, onValueChangeFinished = { player.seekTo(seekPreview); seeking = false; touch() }, valueRange = 0f..duration.coerceAtLeast(1).toFloat(), enabled = duration > 0 && player.isCurrentMediaItemSeekable)
+                    Slider(value = (if (seeking) seekPreview else position).coerceIn(0, duration.coerceAtLeast(1)).toFloat(), onValueChange = { seeking = true; seekPreview = it.toLong(); interaction++ }, onValueChangeFinished = { if (seeking) { player.seekTo(seekPreview); position = seekPreview }; seeking = false; touch() }, valueRange = 0f..duration.coerceAtLeast(1).toFloat(), enabled = duration > 0 && player.isCurrentMediaItemSeekable)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("${VideoPlaybackRules.time(if (seeking) seekPreview else position)} / ${VideoPlaybackRules.time(duration)}", color = Color.White, fontSize = 12.sp, modifier = Modifier.weight(1f))
                         IconButton(onClick = { repeating = !repeating; player.repeatMode = if (repeating) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF; touch() }) { Icon(Icons.Outlined.Repeat, "Lecture en boucle ${if (repeating) "activée" else "désactivée"}", tint = if (repeating) Blue else Color.White) }
