@@ -2,6 +2,9 @@ package com.jfdedit3.xnative.reader
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.documentfile.provider.DocumentFile
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -25,18 +28,58 @@ import kotlinx.coroutines.withContext
 fun GalleryScreen(settings: () -> Unit) {
     val context = LocalContext.current
     val records by DownloadHistory.state.collectAsStateWithLifecycle()
+    val preferences by SettingsStore.get(context).state.collectAsStateWithLifecycle()
+    var refresh by remember { mutableIntStateOf(0) }
+    var scanning by remember { mutableStateOf(false) }
+    var scanError by remember { mutableStateOf<String?>(null) }
+    val folder = preferences.galleryFolder.ifBlank { preferences.folder }
+    val folderLabel = if (preferences.galleryFolder.isBlank()) preferences.folderLabel else preferences.galleryFolderLabel
+    val chooseFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) runCatching {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            SettingsStore.get(context).update { it.copy(galleryFolder = uri.toString(), galleryFolderLabel = DocumentFile.fromTreeUri(context, uri)?.name ?: "Dossier choisi") }
+            refresh++
+        }.onFailure { scanError = "Ce dossier n’autorise pas la lecture. Choisissez-le à nouveau." }
+    }
     val progress by Transfers.state.collectAsStateWithLifecycle()
     var actual by remember { mutableStateOf<List<DownloadRecord>>(emptyList()) }
     var showFailures by remember { mutableStateOf(false) }
     var account by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(records) { actual = withContext(Dispatchers.IO) { records.filter { it.state == "complete" }.mapNotNull { record -> MediaFiles.size(context, record.uri)?.let { record.copy(size = it) } } } }
+    LaunchedEffect(folder) { account = null }
+    var external by remember { mutableStateOf<List<DownloadRecord>>(emptyList()) }
+    LaunchedEffect(folder, refresh) {
+        scanning = true; scanError = null; external = emptyList()
+        try {
+            if (folder.isNotBlank()) {
+                val result = withContext(Dispatchers.IO) { GalleryScanner.scan(context, folder, folderLabel) }
+                external = result.files
+                scanError = result.warnings.distinct().joinToString("\n").takeIf { it.isNotBlank() }
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (error: Exception) {
+            Diagnostics.log(context, "Galerie : ${error.message}")
+            scanError = "Dossier inaccessible. Sélectionnez-le à nouveau pour autoriser sa lecture."
+        } finally { scanning = false }
+    }
+    LaunchedEffect(records, external, refresh) {
+        actual = withContext(Dispatchers.IO) {
+            val own = records.filter { it.state == "complete" }.mapNotNull { record -> MediaFiles.size(context, record.uri)?.let { record.copy(size = it) } }
+            GalleryScanner.merge(context, own, external)
+        }
+    }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Galerie", fontSize = 28.sp, modifier = Modifier.weight(1f))
+                IconButton(onClick = { refresh++ }, enabled = !scanning) { Icon(Icons.Outlined.Refresh, "Actualiser la galerie") }
                 IconButton(onClick = settings) { Icon(Icons.Outlined.Settings, "Réglages") }
             }
             Text("${actual.size} médias · ${actual.sumOf { it.size } / 1024 / 1024} Mo sur le disque", color = Muted, fontSize = 12.sp)
+            TextButton(onClick = { chooseFolder.launch(null) }) { Icon(Icons.Outlined.FolderOpen, null); Text(" Lire un dossier existant") }
+            if (folder.isNotBlank()) Text("Dossier lu : $folderLabel (avec ses sous-dossiers)", color = Muted, fontSize = 12.sp)
+            else Text("Pour afficher des fichiers téléchargés ailleurs, choisissez le dossier qui les contient.", color = Muted, fontSize = 12.sp)
+            if (scanning) LinearProgressIndicator(Modifier.fillMaxWidth())
+            scanError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
         }
         if (progress.running) item {
             Text("${progress.done + 1}/${progress.total} · ${progress.name}", fontSize = 12.sp)
@@ -55,14 +98,14 @@ fun GalleryScreen(settings: () -> Unit) {
         if (showFailures) items(failed, key = { "failure-${it.handle}-${it.id}" }) { Text("${it.name} : ${it.error}", color = Muted, fontSize = 11.sp) }
         if (account == null) {
             items(actual.groupBy { it.handle }.toList(), key = { it.first }) { (handle, files) ->
-                ListItem(headlineContent = { Text("@$handle") }, supportingContent = { Text("${files.size} médias · ${files.sumOf { it.size } / 1024 / 1024} Mo") },
-                    leadingContent = { AsyncImage(files.first().uri, "Aperçu du compte", Modifier.size(60.dp)) }, modifier = Modifier.clickable { account = handle })
+                ListItem(headlineContent = { Text(handle) }, supportingContent = { Text("${files.size} médias · ${files.sumOf { it.size } / 1024 / 1024} Mo") },
+                    leadingContent = { AsyncImage(files.first().uri, "Aperçu du dossier", Modifier.size(60.dp)) }, modifier = Modifier.clickable { account = handle })
             }
-            if (actual.isEmpty()) item { Text("Téléchargez un média depuis une publication ou un profil pour le retrouver ici.", color = Muted) }
+            if (actual.isEmpty() && !scanning) item { Text("Choisissez un dossier existant ou téléchargez un média pour le retrouver ici.", color = Muted) }
         } else {
-            item { TextButton(onClick = { account = null }) { Text("← Tous les comptes") }; Text("@$account") }
+            item { TextButton(onClick = { account = null }) { Text("← Tous les dossiers") }; Text(account.orEmpty()) }
             val group = actual.filter { it.handle == account }
-            items(group, key = { it.id }) { file ->
+            items(group, key = { it.uri }) { file ->
                 ListItem(headlineContent = { Text(file.name, fontSize = 12.sp) }, supportingContent = { Text("${file.size / 1024} Ko") },
                     leadingContent = { AsyncImage(file.uri, "Média téléchargé", Modifier.size(70.dp)) }, modifier = Modifier.clickable {
                         MediaUi.viewer.value = MediaSelection(group.map { DownloadItem(it.handle, it.id, Media(it.uri, video = it.mime.startsWith("video/"))) }, group.indexOf(file))
