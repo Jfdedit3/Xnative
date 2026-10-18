@@ -15,6 +15,8 @@ Application Android native de lecture de X/Twitter, en français, développée e
 - Détail de publication avec texte sélectionnable, partage, ouverture des médias et des interactions dans une application externe.
 - Interface sombre, sauvegarde locale atomique et états de chargement, d’erreur et de fil vide.
 
+Identifiant Android (`applicationId`) : `com.jfdedit3.xnative.reader`.
+
 ## Installer et compiler
 
 Prérequis : Android Studio récent, JDK 17 ou 21 et Android SDK 35. L’application fonctionne à partir d’**Android 8.0 (API 26)**.

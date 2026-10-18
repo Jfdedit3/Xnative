@@ -1,4 +1,4 @@
-package com.xnative.app
+package com.jfdedit3.xnative.reader
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*

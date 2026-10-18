@@ -1,4 +1,4 @@
-package com.xnative.app
+package com.jfdedit3.xnative.reader
 
 import android.content.Intent
 import androidx.core.net.toUri

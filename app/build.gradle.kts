@@ -5,10 +5,10 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 android {
-    namespace = "com.xnative.app"
+    namespace = "com.jfdedit3.xnative.reader"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.xnative.app"
+        applicationId = "com.jfdedit3.xnative.reader"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

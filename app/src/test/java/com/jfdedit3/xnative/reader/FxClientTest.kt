@@ -1,4 +1,4 @@
-package com.xnative.app
+package com.jfdedit3.xnative.reader
 
 import org.junit.Assert.*
 import org.junit.Test
