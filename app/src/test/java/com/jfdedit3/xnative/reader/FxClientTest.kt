@@ -39,6 +39,39 @@ class FxClientTest {
         assertTrue(runCatching { PostParser.rss("<!DOCTYPE rss><rss/>", "jack") }.isFailure)
         assertTrue(runCatching { PostParser.rss("<html/>", "jack") }.isFailure)
     }
+    @Test fun keepsAllFourPhotosFromRealFxTwitterRssWithoutEnclosureDuplicates() {
+        val body = javaClass.getResource("/fxtwitter-four-photos.xml")!!.readText()
+        val media = PostParser.rss(body, "nasa").single().media
+        assertEquals(4, media.size)
+        assertEquals(listOf("HUiP9IrX0AARv5Q.jpg", "HUiP9WsWMAAUlkf.jpg", "HUiP9sNWAAAQVxh.jpg", "HUiQA_cXIAEVbgo.jpg"), media.map { java.net.URI(it.url).path.substringAfterLast('/') })
+        assertTrue(media.none { it.video })
+    }
+    @Test fun keepsMixedRssAttachmentsHtmlVideosAndMediaContentInOrder() {
+        val body = """<rss xmlns:media="http://search.yahoo.com/mrss/"><channel><item>
+            <link>https://x.com/jack/status/20</link>
+            <enclosure url="https://example.org/a.jpg" type="image/jpeg"/>
+            <enclosure url="https://example.org/b.mp4" type="video/mp4"/>
+            <media:thumbnail url="https://example.org/b.jpg"/>
+            <media:content url="https://example.org/c.webm" type="video/webm"/>
+            <description><![CDATA[<p>Mixed</p><a href="https://example.org/a.jpg"><img src="https://example.org/a.jpg"/></a>
+            <a href="https://example.org/b.mp4">Media</a><video poster="https://example.org/d.jpg"><source src="https://example.org/d.mp4?x=1&amp;y=2"/></video>
+            <img src="https://example.org/e.gif"/><a href="https://example.org/article">Article</a>]]></description>
+            </item><item><link>https://x.com/jack/status/21</link><description>Text only</description></item></channel></rss>"""
+        val posts = PostParser.rss(body, "jack")
+        val media = posts.first().media
+        assertEquals(listOf("https://example.org/a.jpg", "https://example.org/b.mp4", "https://example.org/c.webm", "https://example.org/d.mp4?x=1&y=2", "https://example.org/e.gif"), media.map { it.url })
+        assertEquals(listOf(false, true, true, true, false), media.map { it.video })
+        assertEquals("https://example.org/b.jpg", media[1].thumbnail)
+        assertEquals("https://example.org/d.jpg", media[3].thumbnail)
+        assertTrue(posts[1].media.isEmpty())
+    }
+    @Test fun keepsAllMixedApiMediaInSourceOrder() {
+        val mixed = tweet.replace("\"media\":{\"all\":[{\"url\":\"https://example.org/a.jpg\",\"type\":\"photo\"}]}", """"media":{"all":[{"url":"https://example.org/a.jpg","type":"photo"},{"url":"https://example.org/b.mp4","type":"video","thumbnail_url":"https://example.org/b.jpg"},{"url":"https://example.org/c.mp4","type":"gif"}]}""")
+        val media = PostParser.api("""{"tweet":$mixed}""").single().media
+        assertEquals(3, media.size)
+        assertEquals(listOf(false, true, true), media.map { it.video })
+        assertEquals("https://example.org/b.jpg", media[1].thumbnail)
+    }
     @Test fun fallsBackToRssOnApiFailure() {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setResponseCode(503))

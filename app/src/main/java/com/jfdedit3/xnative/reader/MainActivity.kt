@@ -73,8 +73,8 @@ class MainActivity : ComponentActivity() {
         Notifications.channels(this)
         lifecycleScope.launch(Dispatchers.IO) {
             DownloadHistory.recover(this@MainActivity)
-            runCatching { if (Build.VERSION.SDK_INT >= 29 || ContextCompat.checkSelfPermission(this@MainActivity, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) MediaFiles.export(this@MainActivity, "dernier_lancement.log", "Démarrage Xnative 1.2.0 · ${java.time.Instant.now()}", "text/plain") }
-            Diagnostics.log(this@MainActivity, "Démarrage Xnative 1.2.0 · Android ${Build.VERSION.SDK_INT}")
+            runCatching { if (Build.VERSION.SDK_INT >= 29 || ContextCompat.checkSelfPermission(this@MainActivity, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) MediaFiles.export(this@MainActivity, "dernier_lancement.log", "Démarrage Xnative 1.2.1 · ${java.time.Instant.now()}", "text/plain") }
+            Diagnostics.log(this@MainActivity, "Démarrage Xnative 1.2.1 · Android ${Build.VERSION.SDK_INT}")
             if (SettingsStore.get(this@MainActivity).state.value.startupNotification) Notifications.post(this@MainActivity, 1, "Xnative est prêt", "Consultation, téléchargements et flux RSS", "app")
         }
         setContent {
@@ -375,13 +375,20 @@ internal fun PostCard(post: Post, saved: Boolean, busy: Boolean, bookmark: () ->
                 if (post.quote.isNotBlank()) Surface(shape = RoundedCornerShape(12.dp), color = Panel, modifier = Modifier.padding(top = 10.dp)) {
                     Text(post.quote, fontSize = 12.sp, lineHeight = 18.sp, maxLines = 5, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(12.dp))
                 }
-                post.media.firstOrNull()?.let { media ->
-                    Box(Modifier.padding(top = 12.dp).fillMaxWidth().height(190.dp).clip(RoundedCornerShape(14.dp)).background(Panel).clickable { MediaUi.open(post) }) {
-                        val image = if (media.video) media.thumbnail else media.url
-                        if (image.isNotBlank()) AsyncImage(image, "Média de la publication", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                        if (media.video) Icon(Icons.Outlined.PlayCircle, "Vidéo — ouvrir la publication pour lire", tint = Color.White, modifier = Modifier.size(44.dp).align(Alignment.Center))
-                        if (mediaPreferences.showDuration && media.duration != null) Text("${media.duration.toInt() / 60}:${(media.duration.toInt() % 60).toString().padStart(2, '0')}", color = Color.White, modifier = Modifier.align(Alignment.BottomStart).background(Ink).padding(6.dp))
-                        if (post.media.size > 1) Text("+${post.media.size - 1}", color = Color.White, modifier = Modifier.align(Alignment.BottomEnd).background(Ink).padding(6.dp))
+                if (post.media.isNotEmpty()) Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    post.media.indices.toList().chunked(2).forEach { row ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            row.forEach { index ->
+                                val media = post.media[index]
+                                Box(Modifier.weight(1f).height(if (post.media.size == 1) 190.dp else 140.dp)
+                                    .clip(RoundedCornerShape(10.dp)).background(Panel).clickable { MediaUi.open(post, index) }) {
+                                    val image = if (media.video) media.thumbnail else media.url
+                                    if (image.isNotBlank()) AsyncImage(image, "Média ${index + 1} sur ${post.media.size}", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                    if (media.video) Icon(Icons.Outlined.PlayCircle, "Lire la vidéo ${index + 1}", tint = Color.White, modifier = Modifier.size(40.dp).align(Alignment.Center))
+                                    if (mediaPreferences.showDuration && media.duration != null) Text("${media.duration.toInt() / 60}:${(media.duration.toInt() % 60).toString().padStart(2, '0')}", color = Color.White, modifier = Modifier.align(Alignment.BottomStart).background(Ink).padding(6.dp))
+                                }
+                            }
+                        }
                     }
                 }
                 if (post.media.isNotEmpty()) TextButton(onClick = { MediaUi.download(post) }) { Icon(Icons.Outlined.Download, null, Modifier.size(16.dp)); Text(" Télécharger les médias") }

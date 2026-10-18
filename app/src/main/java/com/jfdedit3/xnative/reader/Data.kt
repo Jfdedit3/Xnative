@@ -5,6 +5,7 @@ import kotlinx.serialization.json.*
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import org.jsoup.Jsoup
 import org.xml.sax.Attributes
 import org.xml.sax.helpers.DefaultHandler
 import java.io.StringReader
@@ -143,15 +144,22 @@ object PostParser {
         var key = ""
         var value = StringBuilder()
         var fields = mutableMapOf<String, String>()
-        var attachment: Media? = null
+        val attachments = mutableListOf<Media>()
         val handler = object : DefaultHandler() {
             override fun startElement(uri: String?, local: String, qName: String?, attrs: Attributes) {
                 if (local == "rss") recognized = true
-                if (local == "item") { inItem = true; fields = mutableMapOf(); attachment = null }
+                if (local == "item") { inItem = true; fields = mutableMapOf(); attachments.clear() }
                 if (!inItem) return
                 key = local; value = StringBuilder()
-                if (local == "enclosure") attachment = Media(attrs.getValue("url").orEmpty(), video = attrs.getValue("type").orEmpty().startsWith("video"))
-                if (local == "thumbnail") fields["thumbnail"] = attrs.getValue("url").orEmpty()
+                if (local == "enclosure" || (local == "content" && uri == "http://search.yahoo.com/mrss/")) {
+                    val url = attrs.getValue("url").orEmpty()
+                    val mime = attrs.getValue("type").orEmpty()
+                    if (url.isNotBlank()) attachments += Media(url, video = mime.startsWith("video") || attrs.getValue("medium") == "video", mime = mime)
+                }
+                if (local == "thumbnail" && attachments.lastOrNull()?.video == true) {
+                    val index = attachments.lastIndex
+                    attachments[index] = attachments[index].copy(thumbnail = attrs.getValue("url").orEmpty())
+                }
             }
             override fun characters(ch: CharArray, start: Int, length: Int) { if (inItem) value.append(ch, start, length) }
             override fun endElement(uri: String?, local: String, qName: String?) {
@@ -163,8 +171,17 @@ object PostParser {
                 val id = runCatching { Links.postId(url) }.getOrNull() ?: return
                 val handle = runCatching { URI(url).path.split('/')[1] }.getOrDefault(account)
                 val date = runCatching { ZonedDateTime.parse(fields["pubDate"], DateTimeFormatter.RFC_1123_DATE_TIME).toEpochSecond() }.getOrDefault(0)
+                val description = fields["description"].orEmpty()
+                // FxTwitter puts only the first media in <enclosure>; the rest are in HTML.
+                val embedded = Jsoup.parseBodyFragment(description).select("a[href], img[src], video[src], video source[src]").mapNotNull { tag ->
+                    val mediaUrl = tag.attr(if (tag.tagName() == "a") "href" else "src")
+                    val path = runCatching { URI(mediaUrl).path.orEmpty() }.getOrDefault("")
+                    if (mediaUrl.isBlank() || (tag.tagName() == "a" && !path.matches(Regex("(?i).*\\.(jpe?g|png|webp|gif|mp4|webm)")))) return@mapNotNull null
+                    val video = tag.tagName() in setOf("video", "source") || path.endsWith(".mp4", true) || path.endsWith(".webm", true)
+                    Media(mediaUrl, thumbnail = if (video) (if (tag.tagName() == "source") tag.parent()?.attr("poster") else tag.attr("poster")).orEmpty() else "", video = video)
+                }
                 posts += Post(id, url, plain(fields["description"] ?: fields["title"].orEmpty()), handle, handle,
-                    timestamp = date, media = listOfNotNull(attachment?.copy(thumbnail = fields["thumbnail"].orEmpty())), source = "RSS")
+                    timestamp = date, media = (attachments + embedded).distinctBy { it.url }, source = "RSS")
             }
         }
         factory.newSAXParser().parse(InputSource(StringReader(body)), handler)
