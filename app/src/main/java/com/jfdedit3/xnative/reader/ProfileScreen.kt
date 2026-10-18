@@ -35,12 +35,14 @@ import java.util.Locale
 internal fun ProfileScreen(
     state: ProfileState, library: Library, busy: Boolean, snackbar: SnackbarHostState,
     onBack: () -> Unit, onRefresh: () -> Unit, onFollow: () -> Unit,
-    onBookmark: (Post) -> Unit, onPost: (Post) -> Unit, onProfile: (String) -> Unit
+    onBookmark: (Post) -> Unit, onPost: (Post) -> Unit, onProfile: (String) -> Unit,
+    onMore: () -> Unit, onMedia: () -> Unit, onStopMedia: () -> Unit
 ) {
     val context = LocalContext.current
-    var mediaOnly by rememberSaveable(state.account) { mutableStateOf(false) }
+    var mediaTab by rememberSaveable(state.account) { mutableIntStateOf(0) }
+    LaunchedEffect(mediaTab, state.loading) { if (mediaTab > 0 && !state.loading && !state.mediaComplete) onMedia() }
     val user = state.user ?: Profile(state.account, state.account)
-    val posts = state.posts.filter { !mediaOnly || it.media.isNotEmpty() }
+    val posts = state.posts.filter { mediaTab == 0 || it.media.any { media -> media.video == (mediaTab == 2) } }
     Scaffold(containerColor = Ink, snackbarHost = { SnackbarHost(snackbar) }, topBar = {
         TopAppBar(title = {
             Column {
@@ -59,9 +61,17 @@ internal fun ProfileScreen(
                     ProfileHeader(user, state.account in library.accounts, busy, onFollow)
                     if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Blue)
                     state.error?.let { ProfileError(it, !state.loading, onRefresh) }
-                    TabRow(selectedTabIndex = if (mediaOnly) 1 else 0, containerColor = Ink, contentColor = Blue) {
-                        Tab(selected = !mediaOnly, onClick = { mediaOnly = false }, text = { Text("Publications", fontWeight = FontWeight.SemiBold) })
-                        Tab(selected = mediaOnly, onClick = { mediaOnly = true }, text = { Text("Médias", fontWeight = FontWeight.SemiBold) })
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { MediaUi.downloads.value = state.posts.flatMap { post -> post.media.map { DownloadItem(post.handle, post.id, it) } }.distinctBy { it.id } }, enabled = !state.mediaLoading && state.posts.any { it.media.isNotEmpty() }) { Text("Télécharger les médias chargés") }
+                        TextButton(onClick = { browse(context, "https://fxtwitter.com/${state.account}/feed.xml") }) { Text("Flux RSS ↗") }
+                    }
+                    if (state.mediaLoading) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        Text("Chargement de tous les médias : ${state.posts.sumOf { it.media.size }} médias", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
+                        TextButton(onClick = onStopMedia) { Text("Arrêter le chargement") }
+                    } else if (!state.mediaComplete) TextButton(onClick = onMedia) { Text("Charger tous les médias / réessayer") }
+                    TabRow(selectedTabIndex = mediaTab, containerColor = Ink, contentColor = Blue) {
+                        listOf("Publications", "Images", "Vidéos").forEachIndexed { index, name -> Tab(selected = mediaTab == index, onClick = { mediaTab = index }, text = { Text(name) }) }
                     }
                     state.postsError?.let { ProfileError(it, !state.loading, onRefresh) }
                 }
@@ -73,16 +83,17 @@ internal fun ProfileScreen(
                             state.loading -> "Chargement des publications…"
                             user.protected -> "Ce compte est protégé"
                             state.postsError != null -> "Aucune publication disponible hors connexion"
-                            mediaOnly -> "Aucun média dans les publications chargées"
+                            mediaTab > 0 -> "Aucun média dans les publications chargées"
                             else -> "Aucune publication disponible"
                         }, color = Muted)
                         if (user.protected) Text("FxTwitter peut uniquement fournir les publications accessibles publiquement.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                     }
                 }
                 items(posts, key = { it.id }) { post ->
-                    PostCard(post, library.saved.any { it.id == post.id }, busy, { onBookmark(post) }, { onPost(post) }, onProfile)
+                    PostCard(if (mediaTab == 0) post else post.copy(media = post.media.filter { it.video == (mediaTab == 2) }), library.saved.any { it.id == post.id }, busy, { onBookmark(post) }, { onPost(post) }, onProfile)
                     HorizontalDivider(color = Line)
                 }
+                if (mediaTab == 0 && state.next != null) item { TextButton(onClick = onMore, enabled = !state.loading) { Text("Charger les publications précédentes") } }
                 if (posts.isNotEmpty()) item(key = "footer") {
                     Text("${posts.size} publications chargées · FxTwitter", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(20.dp))
                 }

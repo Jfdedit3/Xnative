@@ -4,6 +4,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.xml.sax.Attributes
 import org.xml.sax.helpers.DefaultHandler
 import java.io.StringReader
@@ -15,7 +16,7 @@ import javax.xml.parsers.SAXParserFactory
 import org.xml.sax.InputSource
 
 @Serializable
-data class Media(val url: String, val thumbnail: String = "", val video: Boolean = false)
+data class Media(val url: String, val thumbnail: String = "", val video: Boolean = false, val duration: Double? = null, val mime: String = "")
 @Serializable
 data class Post(
     val id: String, val url: String, val text: String, val name: String, val handle: String,
@@ -29,7 +30,7 @@ data class Profile(
     val banner: String = "", val location: String = "", val website: String = "",
     val websiteLabel: String = "", val joined: String = "", val followers: Long? = null,
     val following: Long? = null, val statuses: Long? = null, val verified: Boolean = false,
-    val protected: Boolean = false
+    val protected: Boolean = false, val mediaCount: Long? = null
 )
 
 @Serializable
@@ -46,6 +47,15 @@ object Links {
         val input = value.trim().removePrefix("@")
         require(input.matches(Regex("[A-Za-z0-9_]{1,15}"))) { "Saisissez un pseudo X valide (sans espace)." }
         return input.lowercase()
+    }
+    private val reserved = setOf("home", "explore", "notifications", "messages", "search", "settings", "i", "intent", "login", "signup", "compose", "tos", "privacy")
+    fun profileHandle(input: String): String {
+        if (!input.trim().startsWith("https://")) return handle(input)
+        val uri = URI(input.trim())
+        require(uri.host?.lowercase() in hosts) { "Ce lien ne provient pas de X ou FxTwitter." }
+        val path = uri.path.trim('/').split('/')
+        require(path.size == 1 && path[0].lowercase() !in reserved) { "Ce lien ne désigne pas un profil." }
+        return handle(path[0])
     }
     fun postId(input: String): String {
         val candidate = Regex("https://[^\\s<>]+").findAll(input).map { it.value.trimEnd('.', ',', ')') }
@@ -72,7 +82,8 @@ object PostParser {
             obj.number("created_timestamp") ?: 0, obj.number("likes"), obj.number("reposts") ?: obj.number("retweets"), obj.number("replies"),
             media.orEmpty().mapNotNull { element ->
                 val m = element as? JsonObject ?: return@mapNotNull null
-                if (m.str("url").isBlank()) null else Media(m.str("url"), m.str("thumbnail_url"), m.str("type") != "photo")
+                if (m.str("url").isBlank()) null else Media(m.str("url"), m.str("thumbnail_url"), m.str("type") in setOf("video", "gif") && !m.str("url").substringBefore('?').endsWith(".gif", true),
+                    (m["duration"] as? JsonPrimitive)?.doubleOrNull, m.str("format"))
             }, quote?.let { "@${(it["author"] as? JsonObject)?.str("screen_name").orEmpty()}\n${it.str("text")}" }.orEmpty(),
             (obj["reposted_by"] as? JsonObject)?.str("screen_name").orEmpty())
     }
@@ -104,7 +115,19 @@ object PostParser {
             website?.str("url").orEmpty(), website?.str("display_url").orEmpty(), user.str("joined"),
             user.number("followers"), user.number("following"), user.number("statuses"),
             ((user["verification"] as? JsonObject)?.get("verified") as? JsonPrimitive)?.booleanOrNull ?: false,
-            (user["protected"] as? JsonPrimitive)?.booleanOrNull ?: false)
+            (user["protected"] as? JsonPrimitive)?.booleanOrNull ?: false, user.number("media_count"))
+    }
+    fun page(body: String): PostPage {
+        val root = json.parseToJsonElement(body).jsonObject
+        val cursor = (root["cursor"] as? JsonObject)?.str("bottom")?.takeIf { it.isNotBlank() }
+        return PostPage(api(body), cursor)
+    }
+    fun accounts(body: String): List<Profile> {
+        val root = json.parseToJsonElement(body).jsonObject
+        require(root.number("code") == null || root.number("code") == 200L) { "Recherche FxTwitter indisponible." }
+        return (root["users"] as? JsonArray).orEmpty().mapNotNull { user ->
+            runCatching { profile(buildJsonObject { put("code", 200); put("user", user) }.toString()) }.getOrNull()
+        }
     }
     private fun plain(html: String) = html.replace(Regex("(?i)<br\\s*/?>|</p>"), "\n")
         .replace(Regex("<[^>]*>"), "").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
@@ -156,8 +179,8 @@ class FxClient(
     private val apiBase: String = "https://api.fxtwitter.com",
     private val rssBase: String = "https://fxtwitter.com"
 ) {
-    private fun get(url: String): String = client.newCall(Request.Builder().url(url)
-        .header("User-Agent", "Xnative/1.1 (Android RSS reader)").build()).execute().use { response ->
+    private fun fetch(url: String): String = client.newCall(Request.Builder().url(url)
+        .header("User-Agent", "Xnative/1.2 (Android RSS reader)").build()).execute().use { response ->
         when (response.code) {
             204 -> return "{\"code\":200,\"results\":[]}"
             429 -> error("FxTwitter limite les requêtes. Réessayez dans quelques minutes.")
@@ -180,6 +203,35 @@ class FxClient(
         check(bytes.size <= 5_000_000) { "Réponse trop volumineuse." }
         bytes.toString(Charsets.UTF_8)
     }
+    var retries: Boolean = false
+    private fun get(url: String): String {
+        var last: Exception? = null
+        repeat(if (retries) 3 else 1) { attempt ->
+            try { return fetch(url) } catch (error: Exception) {
+                last = error
+                // Invalid inputs and 404s will never improve by retrying.
+                if (error.message.orEmpty().contains("introuvable")) throw error
+                if (attempt < 2 && retries) Thread.sleep(250L * (attempt + 1))
+            }
+        }
+        throw last ?: IllegalStateException("Connexion impossible.")
+    }
+    fun page(account: String, cursor: String? = null, count: Int = 30, media: Boolean = false): PostPage {
+        val url = "$apiBase/2/profile/${Links.handle(account)}/${if (media) "media" else "statuses"}".toHttpUrl().newBuilder()
+            .addQueryParameter("count", count.coerceIn(1, 100).toString()).addQueryParameter("safe", "1")
+        cursor?.let { url.addQueryParameter("cursor", it) }
+        return PostParser.page(get(url.build().toString()))
+    }
+    fun search(query: String, cursor: String? = null): PostPage {
+        require(query.isNotBlank()) { "Saisissez une recherche." }
+        val url = "$apiBase/2/search".toHttpUrl().newBuilder().addQueryParameter("q", query.trim()).addQueryParameter("count", "30")
+        cursor?.let { url.addQueryParameter("cursor", it) }
+        return PostParser.page(get(url.build().toString()))
+    }
+    fun accounts(query: String): List<Profile> {
+        val url = "$apiBase/2/typeahead".toHttpUrl().newBuilder().addQueryParameter("q", query.trim()).addQueryParameter("result_type", "users").build()
+        return PostParser.accounts(get(url.toString()))
+    }
     fun timeline(account: String, rssOnly: Boolean): List<Post> {
         val handle = Links.handle(account)
         if (rssOnly) return PostParser.rss(get("$rssBase/$handle/feed.xml?count=30&safe=1"), handle)
@@ -189,7 +241,10 @@ class FxClient(
             catch (_: Exception) { throw apiError }
         }
     }
+    fun rssFeed(account: String): List<Post> = PostParser.rss(get("$rssBase/${Links.handle(account)}/feed.xml?count=100&safe=1"), account)
     fun profile(account: String): Profile = PostParser.profile(get("$apiBase/2/profile/${Links.handle(account)}"))
     fun status(link: String): Post = PostParser.api(get("$apiBase/status/${Links.postId(link)}")).firstOrNull()
         ?: error("Publication inaccessible.")
 }
+
+data class PostPage(val posts: List<Post>, val next: String? = null)

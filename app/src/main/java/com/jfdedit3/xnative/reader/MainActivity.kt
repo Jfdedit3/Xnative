@@ -4,6 +4,16 @@ import android.content.Intent
 import androidx.core.net.toUri
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.os.Build
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -60,15 +70,14 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.rgb(9, 13, 19))
         )
         receive(intent)
+        Notifications.channels(this)
+        lifecycleScope.launch(Dispatchers.IO) {
+            DownloadHistory.recover(this@MainActivity)
+            runCatching { if (Build.VERSION.SDK_INT >= 29 || ContextCompat.checkSelfPermission(this@MainActivity, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) MediaFiles.export(this@MainActivity, "dernier_lancement.log", "Démarrage Xnative 1.2.0 · ${java.time.Instant.now()}", "text/plain") }
+            Diagnostics.log(this@MainActivity, "Démarrage Xnative 1.2.0 · Android ${Build.VERSION.SDK_INT}")
+            if (SettingsStore.get(this@MainActivity).state.value.startupNotification) Notifications.post(this@MainActivity, 1, "Xnative est prêt", "Consultation, téléchargements et flux RSS", "app")
+        }
         setContent {
-            val pending by pendingLink.collectAsStateWithLifecycle()
-            val busy by model.busy.collectAsStateWithLifecycle()
-            LaunchedEffect(pending, busy) {
-                if (pending != null && !busy) {
-                    model.importPost(pending!!)
-                    pendingLink.value = null
-                }
-            }
             MaterialTheme(colorScheme = darkColorScheme(primary = Blue, background = Ink, surface = Ink,
                 surfaceVariant = Panel, onSurfaceVariant = Muted, outlineVariant = Line)) {
                 XnativeApp(model)
@@ -78,145 +87,178 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); receive(intent) }
     private fun receive(intent: Intent?) {
         if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
-            pendingLink.value = intent.getStringExtra(Intent.EXTRA_TEXT)
+            NavigationRequests.link.value = intent.getStringExtra(Intent.EXTRA_TEXT)
             intent.removeExtra(Intent.EXTRA_TEXT)
         }
+        intent?.getStringExtra("page")?.let { NavigationRequests.page.value = it; intent.removeExtra("page") }
+        intent?.getStringExtra("link")?.let { NavigationRequests.link.value = it; intent.removeExtra("link") }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun XnativeApp(model: FeedViewModel) {
+    val context = LocalContext.current
     val library by model.library.collectAsStateWithLifecycle()
     val busy by model.busy.collectAsStateWithLifecycle()
     val message by model.message.collectAsStateWithLifecycle()
-    var tab by rememberSaveableState(0)
-    var mediaOnly by rememberSaveableState(false)
+    val more by model.more.collectAsStateWithLifecycle()
+    val preferences by model.preferences.collectAsStateWithLifecycle()
+    val mediaRequest by MediaUi.downloads.collectAsStateWithLifecycle()
+    val viewer by MediaUi.viewer.collectAsStateWithLifecycle()
+    val incoming by NavigationRequests.link.collectAsStateWithLifecycle()
+    val requestedPage by NavigationRequests.page.collectAsStateWithLifecycle()
+    var tab by rememberSaveableState(1)
+    var previousTab by rememberSaveableState(1)
+    var settings by rememberSaveableState(false)
+    var favoritesPosts by rememberSaveableState(false)
     var query by rememberSaveableState("")
+    var searchPosts by rememberSaveableState(false)
     var importDialog by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Post?>(null) }
-    val snackbar = remember { SnackbarHostState() }
-    val feedScroll = rememberLazyListState()
-    val profileScreens = rememberSaveableStateHolder()
-    val profiles: ProfileViewModel = viewModel()
-    val profileState by profiles.state.collectAsStateWithLifecycle()
     var profileStack by rememberSaveableState(arrayListOf<String>())
     val profileHandle = profileStack.lastOrNull().orEmpty()
-    val closeProfile: () -> Unit = { profileStack = ArrayList(profileStack.dropLast(1)) }
-    val showProfile: (String) -> Unit = { handle ->
-        val canonical = runCatching { Links.handle(handle) }.getOrNull()
-        if (canonical != null) {
-            selected = null
-            if (canonical != profileHandle) profileStack = ArrayList(profileStack + canonical)
+    val profiles: ProfileViewModel = viewModel()
+    val search: SearchViewModel = viewModel()
+    val profileState by profiles.state.collectAsStateWithLifecycle()
+    val searchState by search.state.collectAsStateWithLifecycle()
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val scroll = rememberLazyListState()
+    val profileScreens = rememberSaveableStateHolder()
+    var pendingPermission by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val storagePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val action = pendingPermission; pendingPermission = null
+        if (granted) action?.invoke() else scope.launch { snackbar.showSnackbar("Autorisation de stockage refusée.") }
+    }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) scope.launch { snackbar.showSnackbar("Notifications désactivées. Vous pouvez suivre les transferts dans Galerie.") }
+    }
+    val requestNotifications: () -> Unit = {
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+    }
+    fun storageAction(action: () -> Unit) {
+        if (Build.VERSION.SDK_INT <= 28 && preferences.folder.isBlank() && ContextCompat.checkSelfPermission(context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            pendingPermission = action; storagePermission.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        } else action()
+    }
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) runCatching {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            SettingsStore.get(context).update { it.copy(folder = uri.toString(), folderLabel = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri)?.name ?: "Dossier personnalisé") }
+        }.onFailure { scope.launch { snackbar.showSnackbar("Ce dossier n’autorise pas l’écriture.") } }
+    }
+    val export: (String, String) -> Unit = { name, value -> storageAction {
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { MediaFiles.export(context, name, value, if (name.endsWith(".log")) "text/plain" else "application/json") } }
+                .onSuccess { snackbar.showSnackbar("Export enregistré : $name") }
+                .onFailure { snackbar.showSnackbar(Diagnostics.error(context, it)) }
         }
+    } }
+    fun startDownloads(items: List<DownloadItem>) {
+        if (items.isEmpty()) { scope.launch { snackbar.showSnackbar("Aucun média correspondant au filtre.") }; return }
+        requestNotifications()
+        storageAction { scope.launch { runCatching { withContext(Dispatchers.IO) { Transfers.start(context, items) } }.onSuccess { tab = 2 }.onFailure { snackbar.showSnackbar(Diagnostics.error(context, it)) } } }
     }
-    LaunchedEffect(profileHandle, library.rssOnly) {
-        if (profileHandle.isNotEmpty()) profiles.load(profileHandle, library) else profiles.close()
+    val showProfile: (String) -> Unit = { input ->
+        runCatching { Links.profileHandle(input) }.onSuccess { handle ->
+            selected = null; settings = false
+            if (tab != 4) previousTab = tab
+            if (handle != profileHandle) profileStack = ArrayList(profileStack + handle)
+            tab = 4
+        }.onFailure { scope.launch { snackbar.showSnackbar(it.message ?: "Profil invalide.") } }
     }
-    BackHandler(enabled = profileHandle.isNotEmpty() && selected == null) { closeProfile() }
+    val backProfile: () -> Unit = {
+        profileStack = ArrayList(profileStack.dropLast(1)); if (profileStack.isEmpty()) tab = previousTab
+    }
+    LaunchedEffect(profileHandle, tab == 4, library.rssOnly) { if (tab == 4 && profileHandle.isNotEmpty()) profiles.load(profileHandle, library) else profiles.close() }
     LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); model.clearMessage() } }
-    if (profileHandle.isNotEmpty()) {
-        profileScreens.SaveableStateProvider(profileHandle) {
-            ProfileScreen(if (profileState.account == profileHandle) profileState else ProfileState(profileHandle, loading = true), library, busy, snackbar,
-            onBack = { closeProfile() }, onRefresh = { profiles.load(profileHandle, library) },
-            onFollow = { if (profileHandle in library.accounts) model.unfollow(profileHandle) else model.follow(profileHandle) },
-            onBookmark = model::bookmark, onPost = { selected = it }, onProfile = showProfile)
+    LaunchedEffect(requestedPage) { requestedPage?.let { tab = if (it == "downloads") 2 else 1; NavigationRequests.page.value = null } }
+    LaunchedEffect(incoming, busy) {
+        if (incoming != null && !busy) {
+            val value = incoming!!; NavigationRequests.link.value = null
+            if (runCatching { Links.postId(value) }.isSuccess) { model.importPost(value); tab = 1 }
+            else showProfile(Regex("https://[^\\s<>]+").find(value)?.value ?: value)
         }
-        selected?.let { post -> PostDialog(post, { selected = null }, showProfile) }
-        return
     }
-    val titles = listOf("Votre fil", "Explorer", "Favoris", "Abonnements")
-    val icons = listOf(Icons.Outlined.Home, Icons.Outlined.Search, Icons.Outlined.BookmarkBorder, Icons.Outlined.PeopleOutline)
-    Scaffold(containerColor = Ink, snackbarHost = { SnackbarHost(snackbar) },
-        topBar = {
-            Column {
-                Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(Blue), contentAlignment = Alignment.Center) {
-                        Text("χ", color = Ink, fontWeight = FontWeight.Black, fontSize = 34.sp)
-                    }
-                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                        Text("Xnative", fontSize = 23.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp)
-                        Text("VOTRE MONDE, SANS LE BRUIT", color = Muted, fontSize = 9.sp, letterSpacing = 1.3.sp)
-                    }
-                    IconButton(onClick = model::refresh, enabled = !busy && library.accounts.isNotEmpty()) {
-                        Icon(Icons.Outlined.Refresh, "Actualiser le fil", tint = Blue)
-                    }
-                }
-                HorizontalDivider(color = Line)
-            }
-        },
-        bottomBar = {
-            NavigationBar(containerColor = Ink, tonalElevation = 0.dp) {
-                titles.forEachIndexed { index, title ->
-                    NavigationBarItem(selected = tab == index, onClick = { tab = index },
-                        icon = { Icon(icons[index], title) }, label = { Text(title, fontSize = 10.sp) },
-                        colors = NavigationBarItemDefaults.colors(selectedIconColor = Blue, selectedTextColor = Blue, indicatorColor = Panel))
-                }
-            }
-        },
-        floatingActionButton = {
-            if (tab == 0 || tab == 1) FloatingActionButton(onClick = { importDialog = true }, containerColor = Blue, contentColor = Ink) {
-                Icon(Icons.Outlined.AddLink, "Importer une publication")
-            }
+    LaunchedEffect(mediaRequest, preferences.confirmDownloads) {
+        if (!preferences.confirmDownloads) mediaRequest?.let { items -> MediaUi.downloads.value = null; startDownloads(if (items.size == 1) items else items.filter { preferences.mediaFilter == "all" || (preferences.mediaFilter == "videos") == it.media.video }) }
+    }
+    LaunchedEffect(scroll, more, busy, tab) {
+        if (tab == 1 && more && !busy) snapshotFlow {
+            val info = scroll.layoutInfo
+            info.totalItemsCount > 0 && (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - 3
+        }.distinctUntilChanged().collect { atEnd -> if (atEnd) model.loadMore() }
+    }
+    BackHandler(enabled = selected == null && viewer == null && (settings || tab == 4 && profileHandle.isNotEmpty())) { if (settings) settings = false else backProfile() }
+    val titles = listOf("Favoris", "Actus", "Galerie", "Recherche", "Profil")
+    val icons = listOf(Icons.Outlined.StarOutline, Icons.Outlined.Home, Icons.Outlined.PhotoLibrary, Icons.Outlined.Search, Icons.Outlined.PersonOutline)
+    Scaffold(containerColor = Ink, snackbarHost = { if (tab != 4 || profileHandle.isBlank() || settings) SnackbarHost(snackbar) }, topBar = {
+        if (tab != 4 && !settings) Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Xnative", fontSize = 23.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            IconButton(onClick = { importDialog = true }) { Icon(Icons.Outlined.AddLink, "Ouvrir un lien") }
+            IconButton(onClick = { if (tab == 0) model.refreshCards() else model.refresh() }, enabled = !busy) { Icon(Icons.Outlined.Refresh, "Actualiser", tint = Blue) }
         }
-    ) { padding ->
+    }, bottomBar = {
+        NavigationBar(containerColor = Ink) { titles.forEachIndexed { index, title ->
+            NavigationBarItem(selected = tab == index && !settings, onClick = { settings = false; tab = index }, icon = { Icon(icons[index], title) }, label = { Text(title, fontSize = 10.sp) })
+        } }
+    }) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Blue)
-            when (tab) {
-                3 -> Accounts(library, busy, model, showProfile)
+            when {
+                settings -> SettingsScreen(model, preferences, { settings = false }, { folderPicker.launch(null) }, export, requestNotifications, { settings = false; tab = 2 })
+                tab == 2 -> GalleryScreen { settings = true }
+                tab == 4 && profileHandle.isNotBlank() -> profileScreens.SaveableStateProvider(profileHandle) {
+                    ProfileScreen(if (profileState.account == profileHandle) profileState else ProfileState(profileHandle, loading = true), library, busy, snackbar,
+                        onBack = backProfile, onRefresh = { profiles.load(profileHandle, library) },
+                        onFollow = { if (profileHandle in library.accounts) model.unfollow(profileHandle) else model.follow(profileHandle) },
+                        onBookmark = model::bookmark, onPost = { selected = it }, onProfile = showProfile,
+                        onMore = profiles::loadMore, onMedia = profiles::loadAllMedia, onStopMedia = profiles::stopMedia)
+                }
+                tab == 0 && !favoritesPosts -> {
+                    Row(Modifier.padding(horizontal = 18.dp)) { FilterChip(true, {}, label = { Text("Comptes") }); Spacer(Modifier.width(8.dp)); FilterChip(false, { favoritesPosts = true }, label = { Text("Posts enregistrés") }) }
+                    PullToRefreshBox(busy, model::refreshCards, Modifier.weight(1f)) { Accounts(library, busy, model, showProfile) }
+                }
+                tab == 3 || tab == 4 -> {
+                    OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(16.dp), label = { Text("Pseudo, recherche ou lien X") }, singleLine = true)
+                    Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Button(onClick = { if (query.contains("https://")) NavigationRequests.link.value = query else if (tab == 4) showProfile(query) else search.search(query, searchPosts) }, enabled = query.isNotBlank()) { Text(if (tab == 4) "Voir le profil" else "Rechercher") }
+                        if (tab == 3) TextButton(onClick = { searchPosts = !searchPosts }) { Text(if (searchPosts) "Posts" else "Comptes") }
+                    }
+                    if (searchState.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    searchState.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) }
+                    LazyColumn(Modifier.weight(1f)) {
+                        if (!searchPosts) items(searchState.accounts, key = { it.handle }) { user -> ListItem(headlineContent = { Text(user.name) }, supportingContent = { Text("@${user.handle}") }, leadingContent = { InitialAvatar(user.name, url = user.avatar) }, modifier = Modifier.clickable { showProfile(user.handle) }) }
+                        else items(searchState.posts, key = { it.id }) { post -> PostCard(post, library.saved.any { it.id == post.id }, busy, { model.bookmark(post) }, { selected = post }, showProfile) }
+                        if (searchState.next != null && searchPosts) item { TextButton(onClick = { search.search(query, true, true) }, enabled = !searchState.loading) { Text("Charger la suite") } }
+                        item { TextButton(onClick = { showProfile(query) }, enabled = query.isNotBlank()) { Text("Ouvrir directement ce pseudo") } }
+                    }
+                }
                 else -> {
-                    Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
-                        Text(titles[tab], fontSize = 29.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.7).sp)
-                        Spacer(Modifier.height(5.dp))
-                        Text(when (tab) {
-                            1 -> "Retrouvez une publication ou ajoutez un compte."
-                            2 -> "Vos lectures à garder, disponibles hors connexion."
-                            else -> "${library.accounts.size} comptes suivis · Propulsé par FxTwitter"
-                        }, color = Muted, fontSize = 12.sp)
-                        if (tab == 1) {
-                            Spacer(Modifier.height(16.dp))
-                            OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true,
-                                placeholder = { Text("Rechercher dans le fil") }, leadingIcon = { Icon(Icons.Outlined.Search, null) },
-                                shape = RoundedCornerShape(16.dp))
-                            TextButton(onClick = { tab = 3 }) { Text("Suivre un nouveau compte →") }
-                        }
-                        if (tab == 0) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(selected = !mediaOnly, onClick = { mediaOnly = false }, label = { Text("Tout le fil") })
-                            FilterChip(selected = mediaOnly, onClick = { mediaOnly = true }, label = { Text("Médias") }, leadingIcon = { Icon(Icons.Outlined.Image, null, Modifier.size(16.dp)) })
-                        }
-                    }
-                    val all = if (tab == 2) library.saved else library.timeline()
-                    val posts = all.filter { post ->
-                        (tab != 0 || !mediaOnly || post.media.isNotEmpty()) &&
-                            (tab != 1 || query.isBlank() || "${post.text} ${post.name} ${post.handle}".contains(query.trim(), true))
-                    }
-                    PullToRefreshBox(isRefreshing = busy, onRefresh = { if (tab != 2) model.refresh() }, modifier = Modifier.weight(1f)) {
-                        if (posts.isEmpty()) {
-                            LazyColumn(Modifier.fillMaxSize(), state = feedScroll, contentPadding = PaddingValues(24.dp)) {
-                                item {
-                                    EmptyState(when(tab) { 2 -> "Une bonne lecture se garde"; 1 -> "Trouvez votre prochaine lecture"; else -> if (mediaOnly) "Aucun média pour le moment" else "Votre fil commence ici" },
-                                        when(tab) { 2 -> "Touchez le marque-page d’une publication pour la retrouver ici."; 1 -> "La recherche porte sur les publications déjà chargées. Ajoutez des comptes pour enrichir votre fil."; else -> "Suivez vos comptes préférés ou importez un lien X pour commencer." },
-                                        if (tab == 2) Icons.Outlined.BookmarkBorder else Icons.Outlined.DynamicFeed)
-                                    if (tab != 2) {
-                                        Button(onClick = { tab = 3 }, modifier = Modifier.fillMaxWidth()) { Text("Choisir des comptes") }
-                                        OutlinedButton(onClick = { importDialog = true }, modifier = Modifier.fillMaxWidth()) { Text("Importer un lien X") }
-                                    }
-                                }
-                            }
-                        } else LazyColumn(Modifier.fillMaxSize(), state = feedScroll, contentPadding = PaddingValues(bottom = 90.dp)) {
-                            items(posts, key = { it.id }) { post ->
-                                PostCard(post, library.saved.any { it.id == post.id }, busy, { model.bookmark(post) }, { selected = post }, showProfile)
-                                HorizontalDivider(color = Line)
-                            }
-                            item { Text("Vous êtes à jour · ${posts.size} publications en cache", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(20.dp)) }
+                    if (tab == 0) Row(Modifier.padding(horizontal = 18.dp)) { FilterChip(false, { favoritesPosts = false }, label = { Text("Comptes") }); Spacer(Modifier.width(8.dp)); FilterChip(true, {}, label = { Text("Posts enregistrés") }) }
+                    val posts = if (tab == 0) library.saved else library.timeline()
+                    PullToRefreshBox(busy, { if (tab == 1) model.refresh() }, Modifier.weight(1f)) {
+                        LazyColumn(Modifier.fillMaxSize(), state = scroll, contentPadding = PaddingValues(bottom = 24.dp)) {
+                            if (posts.isEmpty()) item { EmptyState("Votre fil commence ici", "Ajoutez un compte dans Favoris ou ouvrez un lien X.", Icons.Outlined.DynamicFeed); Button(onClick = { tab = 0 }) { Text("Choisir des comptes") } }
+                            items(posts, key = { it.id }) { post -> PostCard(post, library.saved.any { it.id == post.id }, busy, { model.bookmark(post) }, { selected = post }, showProfile); HorizontalDivider(color = Line) }
+                            if (tab == 1 && more) item { TextButton(onClick = model::loadMore, enabled = !busy) { Text("Charger les publications précédentes") } }
                         }
                     }
                 }
             }
         }
     }
-    if (importDialog) ImportDialog(busy, onDismiss = { importDialog = false }, onImport = { model.importPost(it); importDialog = false; tab = 0 })
-    selected?.let { post -> PostDialog(post, { selected = null }, showProfile) }
+    if (importDialog) ImportDialog(busy, { importDialog = false }, { NavigationRequests.link.value = it; importDialog = false })
+    selected?.let { PostDialog(it, { selected = null }, showProfile) }
+    viewer?.let { MediaViewer(it, preferences) { MediaUi.viewer.value = null } }
+    if (preferences.confirmDownloads && !mediaRequest.isNullOrEmpty()) {
+        var filter by remember(mediaRequest) { mutableStateOf(if (mediaRequest?.size == 1) "all" else preferences.mediaFilter) }
+        val filtered = mediaRequest!!.filter { filter == "all" || (filter == "videos") == it.media.video }
+        AlertDialog(onDismissRequest = { MediaUi.downloads.value = null }, title = { Text("Télécharger ${filtered.size} médias ?") }, text = {
+            Column { Text("Destination : ${if (preferences.folder.isBlank()) "Download/XNative/<pseudo>/" else "${preferences.folderLabel}/XNative/<pseudo>/"}"); listOf("all" to "Tout", "images" to "Images", "videos" to "Vidéos").forEach { (key, name) -> Row(verticalAlignment = Alignment.CenterVertically) { RadioButton(filter == key, { filter = key }); Text(name) } } }
+        }, confirmButton = { TextButton(onClick = { MediaUi.downloads.value = null; startDownloads(filtered) }, enabled = filtered.isNotEmpty()) { Text("Télécharger") } }, dismissButton = { TextButton(onClick = { MediaUi.downloads.value = null }) { Text("Annuler") } })
+    }
 }
 
 // saveable state keeps navigation and search intact during configuration changes.
@@ -241,6 +283,7 @@ private fun Accounts(library: Library, busy: Boolean, model: FeedViewModel, onPr
     var handle by rememberSaveableState("")
     var remove by remember { mutableStateOf<String?>(null) }
     var clear by remember { mutableStateOf(false) }
+    val cards by ProfileCache.state.collectAsStateWithLifecycle()
     var accountError by remember { mutableStateOf<String?>(null) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
@@ -270,10 +313,10 @@ private fun Accounts(library: Library, busy: Boolean, model: FeedViewModel, onPr
         item { Text("VOS ABONNEMENTS · ${library.accounts.size}", color = Muted, fontSize = 11.sp, letterSpacing = 1.sp) }
         items(library.accounts, key = { it }) { account ->
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Panel).clickable { onProfile(account) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                InitialAvatar(account)
+                InitialAvatar(cards[account]?.user?.name ?: account, url = cards[account]?.user?.avatar.orEmpty())
                 Column(Modifier.weight(1f).padding(start = 12.dp)) {
                     Text("@$account", fontWeight = FontWeight.SemiBold)
-                    Text("${library.feeds[account].orEmpty().size} publications en cache", color = Muted, fontSize = 11.sp)
+                    Text("${cards[account]?.user?.mediaCount ?: cards[account]?.posts?.sumOf { it.media.size } ?: library.feeds[account].orEmpty().sumOf { it.media.size }} médias · ${library.feeds[account].orEmpty().size} posts en cache", color = Muted, fontSize = 11.sp)
                 }
                 IconButton(onClick = { remove = account }, enabled = !busy) { Icon(Icons.Outlined.PersonRemove, "Ne plus suivre @$account", tint = Muted) }
             }
@@ -293,7 +336,7 @@ private fun Accounts(library: Library, busy: Boolean, model: FeedViewModel, onPr
             Text("Sans connexion X. Abonnements, favoris et cache sont enregistrés sur cet appareil. Les compteurs proviennent de FxTwitter et ne sont pas mis à jour en temps réel. Les vidéos et les interactions X s’ouvrent dans une application externe.",
                 color = Muted, fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 8.dp))
             TextButton(onClick = { clear = true }, enabled = !busy && library.imported.isNotEmpty()) { Text("Effacer les publications importées") }
-            Text("Xnative 1.1.0 · Indépendant de X et de FxTwitter", color = Muted, fontSize = 10.sp)
+            Text("Xnative 1.2.0 · Indépendant de X et de FxTwitter", color = Muted, fontSize = 10.sp)
         }
     }
     remove?.let { account ->
@@ -317,6 +360,7 @@ internal fun InitialAvatar(name: String, modifier: Modifier = Modifier, url: Str
 @Composable
 internal fun PostCard(post: Post, saved: Boolean, busy: Boolean, bookmark: () -> Unit, open: () -> Unit, onProfile: (String) -> Unit) {
     val context = LocalContext.current
+    val mediaPreferences by SettingsStore.get(context).state.collectAsStateWithLifecycle()
     Column(Modifier.fillMaxWidth().clickable(onClick = open).padding(horizontal = 18.dp, vertical = 16.dp)) {
         if (post.repostedBy.isNotEmpty()) Text("↻ @${post.repostedBy} a republié", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(start = 54.dp, bottom = 8.dp).clickable { onProfile(post.repostedBy) })
         Row {
@@ -332,13 +376,15 @@ internal fun PostCard(post: Post, saved: Boolean, busy: Boolean, bookmark: () ->
                     Text(post.quote, fontSize = 12.sp, lineHeight = 18.sp, maxLines = 5, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(12.dp))
                 }
                 post.media.firstOrNull()?.let { media ->
-                    Box(Modifier.padding(top = 12.dp).fillMaxWidth().height(190.dp).clip(RoundedCornerShape(14.dp)).background(Panel)) {
+                    Box(Modifier.padding(top = 12.dp).fillMaxWidth().height(190.dp).clip(RoundedCornerShape(14.dp)).background(Panel).clickable { MediaUi.open(post) }) {
                         val image = if (media.video) media.thumbnail else media.url
                         if (image.isNotBlank()) AsyncImage(image, "Média de la publication", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                         if (media.video) Icon(Icons.Outlined.PlayCircle, "Vidéo — ouvrir la publication pour lire", tint = Color.White, modifier = Modifier.size(44.dp).align(Alignment.Center))
+                        if (mediaPreferences.showDuration && media.duration != null) Text("${media.duration.toInt() / 60}:${(media.duration.toInt() % 60).toString().padStart(2, '0')}", color = Color.White, modifier = Modifier.align(Alignment.BottomStart).background(Ink).padding(6.dp))
                         if (post.media.size > 1) Text("+${post.media.size - 1}", color = Color.White, modifier = Modifier.align(Alignment.BottomEnd).background(Ink).padding(6.dp))
                     }
                 }
+                if (post.media.isNotEmpty()) TextButton(onClick = { MediaUi.download(post) }) { Icon(Icons.Outlined.Download, null, Modifier.size(16.dp)); Text(" Télécharger les médias") }
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Metric(Icons.Outlined.ChatBubbleOutline, post.replies, "Réponses")
                     Metric(Icons.Outlined.Repeat, post.reposts, "Republications")
@@ -379,14 +425,14 @@ private fun ImportDialog(busy: Boolean, onDismiss: () -> Unit, onImport: (String
     var error by remember { mutableStateOf<String?>(null) }
     AlertDialog(onDismissRequest = onDismiss, icon = { Icon(Icons.Outlined.AddLink, null, tint = Blue) }, title = { Text("Une publication à lire ?") },
         text = { Column {
-            Text("Collez un lien X, Twitter ou FxTwitter. Vous pouvez aussi partager un lien vers Xnative depuis une autre application.", color = Muted, fontSize = 13.sp)
+            Text("Collez un lien de profil ou de publication X, Twitter ou FxTwitter. Vous pouvez aussi partager un lien vers Xnative depuis une autre application.", color = Muted, fontSize = 13.sp)
             Spacer(Modifier.height(16.dp))
             OutlinedTextField(link, { link = it; error = null }, label = { Text("Lien de la publication") }, maxLines = 3, isError = error != null)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
         } },
         confirmButton = { TextButton(enabled = !busy && link.isNotBlank(), onClick = {
-            runCatching { Links.postId(link) }.onSuccess { onImport(link) }.onFailure { error = it.message }
-        }) { Text("Ajouter au fil") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } })
+            runCatching { runCatching { Links.postId(link) }.getOrElse { Links.profileHandle(link) } }.onSuccess { onImport(link) }.onFailure { error = it.message }
+        }) { Text("Ouvrir") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } })
 }
 
 @Composable
@@ -400,7 +446,7 @@ private fun PostDialog(post: Post, dismiss: () -> Unit, onProfile: (String) -> U
                 Column {
                     val image = if (media.video) media.thumbnail else media.url
                     if (image.isNotBlank()) AsyncImage(image, "Média de la publication", Modifier.fillMaxWidth().heightIn(max = 320.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Fit)
-                    TextButton(onClick = { browse(context, media.url) }) { Text(if (media.video) "Lire la vidéo ↗" else "Ouvrir l’image ↗") }
+                    TextButton(onClick = { MediaUi.open(post, post.media.indexOf(media)) }) { Text(if (media.video) "Lire la vidéo" else "Voir l’image") }; TextButton(onClick = { MediaUi.downloads.value = listOf(DownloadItem(post.handle, post.id, media)) }) { Text("Télécharger") }
                 }
             }
             item { Text("Pour répondre, aimer ou republier, ouvrez la publication sur X.", color = Muted, fontSize = 12.sp) }

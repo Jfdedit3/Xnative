@@ -1,77 +1,95 @@
 # Xnative
 
-Application Android native de lecture de X/Twitter, en français, développée en Kotlin avec Jetpack Compose et Material 3. Les données viennent de **FxTwitter / FxEmbed**. Aucun compte X ni clé API n’est nécessaire.
+Application Android native de lecture et de téléchargement des médias X/Twitter via **FxTwitter / FxEmbed**, en français, développée en Kotlin avec Jetpack Compose et Material 3.
 
-## Fonctionnalités
+**Version 1.2.0 · Android 7.0 minimum (API 24) · cible Android 15 (API 35)**
 
-- Profils de type X : bannière, avatar, bio, localisation, site web, date d’inscription, compteurs et badges fournis par FxTwitter.
-- Ouverture d’un profil depuis les auteurs, les republications et les abonnements, ou par saisie d’un pseudo ; onglets Publications/Médias et suivi local.
-- Fil chronologique fusionnant les comptes suivis localement, avec déduplication et filtre médias.
-- Ajout et retrait de comptes par pseudo, jusqu’à 30 abonnements.
-- Actualisation par bouton ou glissement vers le bas ; conservation du cache en cas d’erreur réseau.
-- API JSON avec repli automatique vers RSS, ou mode RSS uniquement.
-- Import d’une publication via un lien X, Twitter, FxTwitter ou FixupX.
-- Réception des liens via le menu Android **Partager → Xnative**.
-- Recherche dans les publications déjà chargées, favoris locaux et consultation hors connexion du texte.
-- Avatars, images, citations, republications et compteurs lorsque la source les fournit.
-- Détail de publication avec texte sélectionnable, partage, ouverture des médias et des interactions dans une application externe.
-- Interface sombre, sauvegarde locale atomique et états de chargement, d’erreur et de fil vide.
+Identifiant conservé : **`com.jfdedit3.xnative.reader`**. Aucun compte X ni clé API n’est nécessaire. Ce dépôt concerne uniquement Android ; la version Windows du document de référence ne fait pas partie de cette livraison.
 
-Identifiant Android (`applicationId`) : `com.jfdedit3.xnative.reader`.
+## Navigation
 
-## Installer et compiler
+| Onglet | Fonctions |
+| --- | --- |
+| Favoris | Comptes suivis localement, fiches persistantes avec compteur de médias, posts enregistrés, rafraîchissement des fiches par geste. |
+| Actus | Fil chronologique fusionné, rafraîchissement, chargement automatique des pages précédentes au bas du fil et bouton de pagination. |
+| Galerie | Médias téléchargés regroupés par compte, taille réellement relue sur le disque, vignettes, progression du lot et liste complète des échecs avec leurs motifs. Accès aux réglages par l’engrenage. |
+| Recherche | Recherche de comptes et de publications sur FxTwitter, pagination des résultats, ouverture de liens ou d’un pseudo. |
+| Profil | Bannière, avatar, bio, localisation, site, date d’inscription, compteurs et badges, suivi local, Publications / Images / Vidéos, téléchargement en lot et lien RSS. |
 
-Prérequis : Android Studio récent, JDK 17 ou 21 et Android SDK 35. L’application fonctionne à partir d’**Android 8.0 (API 26)**.
+Touchez le nom, le pseudo ou l’avatar d’un auteur pour ouvrir son profil. Les comptes des Favoris sont également cliquables. Un pseudo ou un lien de profil peut être saisi sans suivre le compte. Les liens X, Twitter, FxTwitter et FixupX sont reconnus, y compris via **Partager → Xnative** ; les pages réservées telles que `home`, `explore` ou `notifications` ne sont pas interprétées comme des profils.
 
-1. Ouvrir ce dépôt dans Android Studio, puis laisser Gradle synchroniser les dépendances.
-2. Installer le SDK Android 35 si Android Studio le demande.
-3. Lancer `app` sur un appareil ou un émulateur.
+Les médias d’un compte sont paginés automatiquement à l’ouverture d’**Images** ou **Vidéos**, jusqu’à l’épuisement du curseur fourni par FxTwitter. Un bouton permet aussi de charger tous les médias depuis Publications et d’arrêter le chargement. Un curseur répété provoque une erreur explicite plutôt qu’une boucle infinie. Le lot concerne les médias déjà chargés : attendre la fin du chargement pour récupérer la totalité accessible via le service.
 
-En ligne de commande, définir `ANDROID_HOME` ou créer un `local.properties` non versionné contenant `sdk.dir=/chemin/vers/android-sdk`, puis :
+## Lecture et téléchargements
+
+- Visionneuse plein écran : balayage, boutons précédent/suivant, zoom par pincement et double toucher.
+- Lecteur vidéo Media3 intégré, avec contrôles, lecture en boucle et pause lorsque l’application passe en arrière-plan.
+- Téléchargement individuel ou en lot ; filtre Tout / Images / Vidéos ; confirmation désactivable.
+- Un seul lot à la fois, exécuté par un service de premier plan Android.
+- Notification de progression : fichier courant, octets transférés, vitesse et action **Annuler** ; récapitulatif de fin de lot.
+- L’annulation coupe l’appel HTTP actif. Les fichiers terminés sont conservés et le fichier incomplet est supprimé.
+- Historique persistant avec reprise manuelle des échecs depuis Galerie. Une réouverture de l’application nettoie les fichiers interrompus par la mort du processus, sans supprimer un transfert encore actif.
+- Noms déterministes fondés sur la publication et l’identité de l’URL du média. L’ordre d’un lot ne modifie pas les noms ; les variations de qualité des URL Twitter n’en créent pas de nouveaux. Un fichier différent déjà présent n’est jamais écrasé.
+- Formats : JPEG, PNG, GIF, WebP, MP4 et WebM. Les GIF natifs restent `.gif` et sont classés comme images. Les animations transmises par X en MP4 sont conservées en MP4 ; aucune fausse extension GIF n’est appliquée et il n’y a pas de conversion vidéo vers GIF.
+
+Les tailles de la Galerie sont obtenues à partir des URI des fichiers et non d’une estimation du transfert. Un fichier supprimé en dehors de l’application n’est plus affiché. La Galerie lit uniquement les téléchargements connus de Xnative et ne scanne pas toutes les photos du téléphone.
+
+## Stockage et permissions
+
+Destination par défaut : **`Download/XNative/<pseudo>/`**. Un dossier parent personnalisé peut être choisi avec le sélecteur Android ; Xnative y crée `XNative/<pseudo>/`. Le droit d’accès à ce dossier est conservé après redémarrage.
+
+Sur Android 10 et ultérieur, les fichiers passent par MediaStore avec `IS_PENDING` : publication après transfert complet, suppression en cas d’échec. Sur Android 7 à 9, un fichier temporaire est écrit puis renommé sans écrasement ; l’autorisation d’écriture est demandée au moment de l’opération. Un dossier personnalisé utilise le Storage Access Framework et un fichier temporaire renommé après transfert.
+
+L’autorisation de notifications est demandée sur Android 13 et ultérieur lors de l’activation du RSS ou d’un téléchargement. Si elle est refusée, la progression reste consultable dans Galerie ; Android peut afficher le service uniquement dans son gestionnaire de tâches. Aucune autorisation globale de lecture de toutes les photos/vidéos n’est nécessaire pour les fichiers créés par l’application.
+
+Les abonnements, posts enregistrés et fils sont dans `library.json`, les fiches dans `profiles.json`, l’historique dans `downloads.json` et son journal d’événements `downloads.events`, dans l’espace privé de l’application. Les snapshots sont écrits atomiquement. L’historique ajoute des événements synchronisés sur disque, compacte son journal et ignore une dernière ligne interrompue. Les images ont aussi le cache de Coil, sans garantie de disponibilité hors connexion après éviction de ce cache.
+
+## Réglages, export et diagnostic
+
+Les réglages sont accessibles depuis l’engrenage de Galerie :
+
+- animations de la visionneuse et transitions d’images ; durée des vidéos ; confirmation des lots ; filtre de contenu et dossier ; taille des pages de 10 à 100 posts ; trois essais réseau activables et détails des erreurs ;
+- rafraîchissement et vidage du cache des fiches, sans retirer les abonnements ni les posts enregistrés ;
+- comptes surveillés par RSS, économie de batterie, analyse immédiate et accès aux paramètres batterie Android ;
+- notification au démarrage, journal consultable et exportable, relance du fil et accès aux téléchargements.
+
+**Exporter les favoris** écrit `Download/XNative/favoris_export.json` (ou le dossier choisi). Le document UTF-8 est versionné : `format: "XNative.favorites"`, `version: 1`, puis `accounts`, `posts` et `profiles`. Les données utilisent des liens publics et pas des URI de stockage Android. Un consommateur Windows peut implémenter ce schéma ; aucun exécutable Windows ni importeur Windows existant n’a été fourni ou testé dans ce projet.
+
+Le journal de débogage est privé et limité en taille. Un journal de démarrage est publié sous `Download/XNative/dernier_lancement.log` lorsque l’accès au stockage le permet ; un export complet est disponible dans les réglages. Les exports précédemment créés par l’application peuvent être remplacés ; les médias téléchargés ne sont jamais écrasés.
+
+## Surveillance RSS
+
+Sélectionnez les comptes dans Réglages, puis activez la surveillance. L’activation programme une première analyse et une tâche persistante WorkManager. La première analyse crée la référence des publications connues ; elle ne notifie pas l’intégralité des archives. Les analyses suivantes notifient les nouvelles publications présentes dans le flux.
+
+Android planifie les vérifications environ toutes les **15 minutes**, ou **1 heure** en économie de batterie. Les contraintes système, Doze, la batterie et le réseau peuvent les différer : ce n’est pas un service push et les publications qui ont déjà disparu du flux ne peuvent pas être récupérées rétroactivement. WorkManager reprogramme les analyses après un redémarrage. Un téléchargement interrompu n’est pas redémarré automatiquement au démarrage du téléphone ; les restrictions Android sur les services de premier plan sont respectées.
+
+**Flux RSS ↗** sur un profil ouvre son URL de flux dans un navigateur ou un lecteur RSS associé. Le réglage « Publications via RSS uniquement » concerne les fils ; la recherche, les informations de profil et les archives complètes de médias utilisent l’API.
+
+## Compiler et installer
+
+Prérequis : Android Studio récent, JDK 17 ou 21, SDK Android 35 et Build Tools 35.0.0. Le wrapper Gradle est inclus. Définir `ANDROID_HOME` ou créer un `local.properties` non versionné avec `sdk.dir=/chemin/android-sdk`.
 
 ```sh
 ./gradlew testDebugUnitTest lintDebug assembleDebug
-```
-
-APK de développement : `app/build/outputs/apk/debug/app-debug.apk`.
-
-```sh
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Le workflow GitHub Actions **Android** exécute les tests, l’analyse Lint et la compilation, puis conserve l’APK dans l’artefact **Xnative-debug**. Une version destinée à la distribution doit être signée avec votre propre clé.
+Le workflow GitHub Actions **Android** exécute les tests et Lint puis produit l’artefact **Xnative-debug**. Les tests Robolectric téléchargent leurs environnements Android depuis Maven Central lors du premier passage. Les APK de développement sont signés avec une clé de test ; une distribution et des mises à jour durables nécessitent une clé de signature conservée par le propriétaire.
 
-## Utilisation
+## Sources et limites
 
-Dans **Abonnements**, ajouter un pseudo, par exemple `NASA`. Revenir dans **Votre fil**, puis actualiser pour charger les publications récentes. En cas d’échec lors de l’ajout, l’abonnement reste enregistré afin de pouvoir réessayer. Le bouton de lien permet d’importer une publication, par exemple `https://x.com/jack/status/20`. Le marque-page conserve une copie dans **Favoris**. **Explorer** recherche uniquement dans le cache local.
+- `https://api.fxtwitter.com/2/profile/{handle}`
+- `https://api.fxtwitter.com/2/profile/{handle}/statuses?count=...&cursor=...`
+- `https://api.fxtwitter.com/2/profile/{handle}/media?count=...&cursor=...`
+- `https://api.fxtwitter.com/2/search?q=...&cursor=...`
+- `https://api.fxtwitter.com/2/typeahead?q=...&result_type=users`
+- `https://api.fxtwitter.com/status/{id}`
+- `https://fxtwitter.com/{handle}/feed.xml`
 
-Touchez l’avatar, le nom ou le pseudo d’un auteur pour ouvrir son profil. Dans **Abonnements**, touchez un compte existant ou saisissez un pseudo puis **Voir le profil**. Le bouton **Suivre / Abonné** du profil gère uniquement les abonnements locaux. Les informations de profil sont chargées via l’API et gardées en mémoire pendant la session ; les erreurs de métadonnées et de publications sont affichées séparément.
+Références : [API FxEmbed](https://docs.fxembed.com/api/introduction), [flux RSS et Atom](https://docs.fxembed.com/guide/advanced/rss-atom-feeds/).
 
-Le réglage **Publications via RSS uniquement** s’applique lors de la prochaine actualisation. Les abonnements et favoris sont propres à Xnative et ne modifient pas un compte X.
+Lors des vérifications du 18 octobre 2026, la recherche de comptes répondait, mais les requêtes de recherche de posts essayées renvoyaient HTTP 404. L’application signale cet échec et propose alors les résultats de son cache local ; elle ne présente pas ces résultats comme une recherche distante réussie.
 
-## Sources FxTwitter
+La disponibilité, les curseurs, les résultats de recherche et l’exhaustivité des archives dépendent de FxTwitter et de X. Les comptes privés et les médias supprimés peuvent être indisponibles. L’application n’authentifie pas un compte X : publier, aimer, répondre et republier ouvrent X ; le suivi et les favoris restent locaux.
 
-Endpoints utilisés :
-
-| Usage | Endpoint |
-| --- | --- |
-| Publications récentes d’un compte | `https://api.fxtwitter.com/2/profile/{handle}/statuses?count=30&safe=1` |
-| Flux RSS d’un compte | `https://fxtwitter.com/{handle}/feed.xml?count=30&safe=1` |
-| Informations d’un profil | `https://api.fxtwitter.com/2/profile/{handle}` |
-| Publication par identifiant | `https://api.fxtwitter.com/status/{id}` |
-
-Références : [API FxEmbed](https://docs.fxembed.com/api/introduction), [flux RSS et Atom](https://docs.fxembed.com/guide/advanced/rss-atom-feeds/), [code FxEmbed](https://github.com/FxEmbed/FxEmbed).
-
-Le premier chargement et l’actualisation nécessitent Internet. La disponibilité, les limites et l’exhaustivité des données dépendent du service tiers. Le fil charge une page récente par compte, sans pagination ; jusqu’à 150 publications sont conservées par abonnement et 300 imports au total. Les favoris sont conservés séparément. Les images sont mises en cache par Coil sans garantie de disponibilité hors connexion. Les vidéos s’ouvrent dans un lecteur externe. Le RSS n’inclut pas tous les compteurs et détails de l’API.
-
-Xnative est un **lecteur** : publier, aimer, répondre, republier et s’authentifier sur X ne sont pas des fonctions de l’API publique FxTwitter utilisée ici. Ces actions sont accessibles par **Ouvrir sur X**. Il n’y a ni messagerie, ni notifications en arrière-plan, ni synchronisation entre appareils.
-
-## Organisation
-
-- `Data.kt` : modèles, validation des liens, parseurs JSON/RSS et client HTTP.
-- `FeedViewModel.kt` : abonnements, import, actualisation et persistance locale.
-- `ProfileViewModel.kt` et `ProfileScreen.kt` : chargement indépendant des profils, navigation, en-tête et publications.
-- `MainActivity.kt` : navigation Compose, fil, recherche, favoris, abonnements et réception des partages.
-- `FxClientTest.kt` : validation des liens, API v1/v2, fils groupés, RSS, repli réseau, limites HTTP et cache. `ProfileTest.kt` vérifie les profils complets, privés, incomplets et les erreurs API.
-
-Les données locales sont stockées dans l’espace privé de l’application (`library.json`) ; aucune télémétrie n’est ajoutée. La désinstallation efface ces données. Les requêtes HTTP sont adressées à FxTwitter et aux hébergeurs des médias. Xnative est indépendant de X Corp et de FxTwitter.
+Les tests couvrent notamment les formats API/RSS, les curseurs, les noms stables, l’export, le stockage MediaStore, le stockage ancien Android et l’annulation d’un flux simulé. La lecture vidéo, les gestes et le comportement des notifications/économie de batterie doivent également être validés sur des téléphones réels ; Robolectric ne remplace pas cette validation matérielle.
