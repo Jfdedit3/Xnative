@@ -76,8 +76,8 @@ class MainActivity : ComponentActivity() {
         Notifications.channels(this)
         lifecycleScope.launch(Dispatchers.IO) {
             DownloadHistory.recover(this@MainActivity)
-            runCatching { if (Build.VERSION.SDK_INT >= 29 || ContextCompat.checkSelfPermission(this@MainActivity, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) MediaFiles.export(this@MainActivity, "dernier_lancement.log", "Démarrage Xnative 1.3.0 · ${java.time.Instant.now()}", "text/plain") }
-            Diagnostics.log(this@MainActivity, "Démarrage Xnative 1.3.0 · Android ${Build.VERSION.SDK_INT}")
+            runCatching { if (Build.VERSION.SDK_INT >= 29 || ContextCompat.checkSelfPermission(this@MainActivity, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) MediaFiles.export(this@MainActivity, "dernier_lancement.log", "Démarrage Xnative 1.4.0 · ${java.time.Instant.now()}", "text/plain") }
+            Diagnostics.log(this@MainActivity, "Démarrage Xnative 1.4.0 · Android ${Build.VERSION.SDK_INT}")
             if (SettingsStore.get(this@MainActivity).state.value.startupNotification) Notifications.post(this@MainActivity, 1, "Xnative est prêt", "Consultation, téléchargements et flux RSS", "app")
         }
         setContent {
@@ -123,6 +123,7 @@ private fun XnativeApp(model: FeedViewModel) {
     val profileHandle = profileStack.lastOrNull().orEmpty()
     val profiles: ProfileViewModel = viewModel()
     val search: SearchViewModel = viewModel()
+    val galuser: GaluserViewModel = viewModel()
     val profileState by profiles.state.collectAsStateWithLifecycle()
     val searchState by search.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -203,10 +204,10 @@ private fun XnativeApp(model: FeedViewModel) {
         else if (tab == 4) showProfile(query)
         else search.search(query, searchPosts)
     }
-    val titles = listOf("Favoris", "Actus", "Galerie", "Recherche", "Profil")
-    val icons = listOf(Icons.Outlined.StarOutline, Icons.Outlined.Home, Icons.Outlined.PhotoLibrary, Icons.Outlined.Search, Icons.Outlined.PersonOutline)
+    val titles = listOf("Favoris", "Actus", "Galerie", "Recherche", "Profil", "Galuser")
+    val icons = listOf(Icons.Outlined.StarOutline, Icons.Outlined.Home, Icons.Outlined.PhotoLibrary, Icons.Outlined.Search, Icons.Outlined.PersonOutline, Icons.Outlined.Collections)
     Scaffold(containerColor = Ink, snackbarHost = { if (tab != 4 || profileHandle.isBlank() || settings) SnackbarHost(snackbar) }, topBar = {
-        if (tab != 4 && !settings) Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (tab != 4 && tab != 5 && !settings) Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Xnative", fontSize = 23.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             IconButton(onClick = { importDialog = true }) { Icon(Icons.Outlined.AddLink, "Ouvrir un lien") }
             IconButton(onClick = { if (tab == 0) model.refreshCards() else model.refresh() }, enabled = !busy) { Icon(Icons.Outlined.Refresh, "Actualiser", tint = Blue) }
@@ -221,6 +222,9 @@ private fun XnativeApp(model: FeedViewModel) {
             when {
                 settings -> SettingsScreen(model, preferences, { settings = false }, { folderPicker.launch(null) }, export, requestNotifications, { settings = false; tab = 2 })
                 tab == 2 -> GalleryScreen { settings = true }
+                tab == 5 -> profileScreens.SaveableStateProvider("screen:galuser") {
+                    GaluserScreen(galuser, library, allowBack = viewer == null && selected == null && mediaRequest.isNullOrEmpty())
+                }
                 tab == 4 && profileHandle.isNotBlank() -> profileScreens.SaveableStateProvider(profileHandle) {
                     ProfileScreen(if (profileState.account == profileHandle) profileState else ProfileState(profileHandle, loading = true), library, busy, snackbar,
                         onBack = backProfile, onRefresh = { profiles.load(profileHandle, library) },

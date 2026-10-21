@@ -15,7 +15,8 @@ data class Preferences(
     val retries: Boolean = true, val detailedErrors: Boolean = false, val mediaFilter: String = "all",
     val monitored: List<String> = emptyList(), val rssEnabled: Boolean = false,
     val batterySaver: Boolean = true, val startupNotification: Boolean = true,
-    val galleryFolder: String = "", val galleryFolderLabel: String = "Dossier choisi"
+    val galleryFolder: String = "", val galleryFolderLabel: String = "Dossier choisi",
+    val galuserAccount: String = ""
 )
 
 class SettingsStore private constructor(context: Context) {

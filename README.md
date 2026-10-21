@@ -2,7 +2,7 @@
 
 Application Android native de lecture et de téléchargement des médias X/Twitter via **FxTwitter / FxEmbed**, en français, développée en Kotlin avec Jetpack Compose et Material 3.
 
-**Version 1.3.0 · Android 7.0 minimum (API 24) · cible Android 15 (API 35)**
+**Version 1.4.0 · Android 7.0 minimum (API 24) · cible Android 15 (API 35)**
 
 Nouvel identifiant : **`com.jfdedit3.xnative.android`**. Aucun compte X ni clé API n’est nécessaire. Ce dépôt concerne uniquement Android ; la version Windows du document de référence ne fait pas partie de cette livraison.
 
@@ -121,3 +121,9 @@ Commandes mobiles inspirées du [lecteur Android de Nart](https://github.com/Jfd
 Le bouton Plein écran ouvre un écran immersif avec changement d’orientation et image dans l’image (Android 8+ et appareil compatible). Quitter cet écran rend la position et la vitesse au lecteur de la publication. Android 12+ active automatiquement le PiP en quittant l’écran immersif pendant la lecture ; les versions antérieures utilisent le signal de départ de l’activité. Les vidéos locales de la galerie sont prises en charge via leurs URI autorisées. La luminosité est limitée à la fenêtre du lecteur et restaurée à sa fermeture ; aucune autorisation de modification globale de luminosité n’est nécessaire. La pause volontaire reste respectée au retour de l’arrière-plan. Le moteur gère le focus audio et met en pause à la déconnexion d’un casque.
 
 Cette adaptation utilise Media3 et Compose, sans embarquer la WebView ni les fonctions propres aux épisodes de Nart. Le crédit et la licence ISC de Nart sont fournis dans `app/src/main/assets/Nart-NOTICE.txt`. Les gestes, codecs, orientation et PiP restent à vérifier sur appareil réel. Le package et la signature des versions 1.2.2+ sont conservés.
+
+### Galuser 1.4.0
+
+Nouvel onglet Galuser : saisissez un pseudo ou un lien de profil, ou choisissez un utilisateur déjà connu. La saisie disparaît après validation et laisse place à une grille de médias avec deux onglets Images et Vidéos. Le bouton Retour et le retour Android réaffichent la saisie. La grille ne contient que les publications de l’utilisateur, sans reposts.
+
+Le chargement récupère automatiquement les pages disponibles sur FxTwitter et affiche les résultats au fur et à mesure, avec cache local, actualisation, arrêt et reprise au même curseur après erreur ou annulation. Les sources de repli (publications puis RSS récent) sont indiquées avec leurs limites. Une vignette ouvre la visionneuse ou le lecteur vidéo existant ; Télécharger prépare uniquement les médias chargés du sous-onglet choisi. Galuser reste distinct de la Galerie des fichiers téléchargés. Le dernier pseudo est mémorisé et les favoris/réglages restent conservés grâce au même package et à la même signature.

@@ -12,6 +12,11 @@ internal class ProfileMediaPager(private val client: FxClient) {
     var notice: String? = null
         private set
 
+    /** A request advances a candidate; the caller commits it only after receiving the page. */
+    fun fork(): ProfileMediaPager = ProfileMediaPager(client).also {
+        it.source = source; it.cursor = cursor; it.started = started
+        it.seen.addAll(seen); it.complete = complete; it.notice = notice
+    }
     fun next(account: String): PostPage {
         check(!complete) { "Les médias disponibles ont déjà été chargés." }
         val page = if (!started) {
